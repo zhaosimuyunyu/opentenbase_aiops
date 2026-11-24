@@ -6,6 +6,42 @@ from backend.engines.readonly_audit_engine import ReadonlyAuditEngine
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_connection_capacity_distinguishes_zero_from_collection_failure(self):
+        module = "backend.engines.readonly_audit_engine"
+        for count, limit, usage, severity in (
+            (None, 100, None, None),
+            (0, None, None, None),
+            (0, 100, 0.0, None),
+            (80, 100, 80.0, "medium"),
+            (95, 100, 95.0, "high"),
+        ):
+            with self.subTest(count=count, limit=limit):
+                checks = {}
+                if count is not None:
+                    checks["connections"] = [{"connection_count": count}] if count else []
+                if limit is not None:
+                    checks["max_connections"] = [{"max_connections": limit}]
+                with patch(f"{module}.OperationsStore"), patch(
+                    f"{module}.ReadonlyHealthCollector"
+                ) as collector, patch.object(
+                    ReadonlyAuditEngine, "_diagnose",
+                    new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []}),
+                ):
+                    collector.return_value.collect.return_value = {
+                        "checks": checks, "errors": {}, "status": "success",
+                    }
+                    result = await ReadonlyAuditEngine().run_health_audit()
+
+                capacity = result["evidence"]["cluster"]["connection_capacity"]
+                self.assertEqual(capacity, {
+                    "scope": "connected_cn", "total": count,
+                    "max_connections": limit, "usage_percent": usage,
+                })
+                self.assertEqual(
+                    [row["severity"] for row in result["findings"] if row["check"] == "connection_capacity"],
+                    [severity] if severity else [],
+                )
+
     async def test_only_complete_fallback_statistics_generate_repair_findings(self):
         module = "backend.engines.readonly_audit_engine"
         stats = {"schemaname": "public", "live_tuples": 1500, "modifications_since_analyze": 1500}

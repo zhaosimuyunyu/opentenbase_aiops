@@ -30,7 +30,9 @@ CHECKS = {
     """,
     "connections": """
         SELECT datname, state, count(*) AS connection_count
-        FROM pg_stat_activity GROUP BY datname, state
+        FROM pg_catalog.pg_stat_activity
+        WHERE backend_type = 'client backend'
+        GROUP BY datname, state
         ORDER BY datname, state
     """,
     "max_connections": "SELECT current_setting('max_connections')::int AS max_connections",

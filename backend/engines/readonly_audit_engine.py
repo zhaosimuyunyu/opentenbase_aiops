@@ -94,15 +94,27 @@ class ReadonlyAuditEngine:
                     'evidence': node,
                 })
         connection_rows = checks.get('connections')
-        total_connections = sum(row['connection_count'] for row in connection_rows or [])
+        total_connections = (
+            sum(row['connection_count'] for row in connection_rows)
+            if connection_rows is not None else None
+        )
         max_rows = checks.get('max_connections') or []
-        max_connections = max_rows[0]['max_connections'] if max_rows else 0
-        usage = round(total_connections / max_connections * 100, 2) if max_connections else None
+        max_connections = max_rows[0]['max_connections'] if max_rows else None
+        usage = (
+            round(total_connections / max_connections * 100, 2)
+            if total_connections is not None and max_connections else None
+        )
+        cluster['connection_capacity'] = {
+            'scope': 'connected_cn',
+            'total': total_connections,
+            'max_connections': max_connections,
+            'usage_percent': usage,
+        }
         if usage is not None and usage >= 80:
             findings.append({
                 'check': 'connection_capacity', 'severity': 'high' if usage >= 95 else 'medium',
-                'observed': f'{usage}% of max_connections',
-                'evidence': {'total': total_connections, 'max_connections': max_connections},
+                'observed': f'Client backends on the connected CN use {usage}% of max_connections',
+                'evidence': cluster['connection_capacity'],
             })
         long_queries = checks.get('long_running_queries') or []
         if long_queries:
@@ -269,7 +281,8 @@ class ReadonlyAuditEngine:
         }
         issue = (
             f"执行 OpenTenBase 只读健康巡检。发现 {len(findings)} 个规则告警，"
-            f"锁等待 {len(blocked_locks)}，连接占用 {usage if usage is not None else '未知'}%，"
+            f"锁等待 {len(blocked_locks)}，当前 CN 客户端连接占用 "
+            f"{f'{usage}%' if usage is not None else '未知'}，"
             f"超过阈值的长查询 {len(long_queries)}。请逐项基于证据解释并给出只读复核建议。"
         )
         if snapshot['status'] == 'error':
