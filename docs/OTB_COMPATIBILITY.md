@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+构建 `b612d77cb` 对应的 `pg_clean--1.0.sql` 明确将诊断、事务提交与回滚、记录清理等函数授予 `PUBLIC`。安装验收应检查普通角色的有效执行权限，并限制恢复入口的授权。已有后台清理器启用的实例还需单独验证注册扩展后是否会立即处理存量预备事务。当前仅核对了安装脚本，尚未实测扩展权限或安装时的后台行为。
+
 同版本源码显示，`pg_clean` 通过各节点上的 `public.pgxc_get_2pc_file`、`public.pgxc_get_record_list` 等 SQL 辅助函数读取事务记录。已从 `lab` 的 CN 和两个 DN 分别查询 `pg_proc`，均未找到诊断入口或这些辅助函数。动态库加载已通过，运行集群级诊断还需要验证各参与节点上的扩展 SQL 定义。
 
 对应构建 `b612d77cb` 的 `contrib/pg_clean/pg_clean.c` 中，`pg_clean_check_txn` 仅允许在 CN 调用，以 `execute = false` 进入状态收集流程，并枚举数据库及 CN、DN 上的事务。诊断结果包含 GID、数据库、全局状态和各节点状态。调用范围覆盖集群，连接到 `lab` 并不能将诊断限制到该库。扩展的恢复入口由独立的 `pg_clean_execute*` 函数提供。当前实测只覆盖动态库加载，尚未调用这些 SQL 函数。
