@@ -74,6 +74,12 @@ def main() -> int:
                     cursor.execute("SET LOCAL lock_timeout = '300ms'")
                     cursor.execute(sql)
                     rows = cursor.fetchall()
+                if name == "database_identity" and (
+                    len(rows) != 1
+                    or not rows[0].get("system_identifier")
+                    or rows[0].get("database") != config.DB_NAME
+                ):
+                    raise ValueError("Database identity is missing or does not match the configured database")
                 connection.rollback()
                 report["probes"][name] = {"status": "pass", "row_count": len(rows), "columns": list(rows[0]) if rows else []}
                 if name == "cluster_nodes":
