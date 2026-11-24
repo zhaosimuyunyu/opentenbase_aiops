@@ -14,14 +14,14 @@ PINNED_SOURCE = re.compile(
 
 
 def main():
-    vector = EmbeddingClient().embed_text(
-        "How do I use pg_locks and pg_stat_activity to diagnose blocking queries?"
-    )
+    query = "How do I use pg_locks and pg_stat_activity to diagnose blocking queries?"
+    vector = EmbeddingClient().embed_text(query)
     if not vector:
         raise SystemExit("Embedding request failed")
     kb = PgVectorKnowledgeBase()
     try:
-        hits = kb.search(vector, top_k=5)[:5]
+        kb.conn.set_session(readonly=True)
+        hits = kb.search(vector, top_k=5, query=query, log_retrieval=False)
     finally:
         kb.close()
     for hit in hits:

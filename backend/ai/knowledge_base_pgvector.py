@@ -52,7 +52,8 @@ class PgVectorKnowledgeBase(OperationsStore):
         return [text[i:i+size].strip() for i in range(0, len(text), size-100) if text[i:i+size].strip()]
 
     def search(self, query_vector: list[float], top_k: int = 5, *,
-               category: str | None = None, query: str = "") -> list[dict[str, Any]]:
+               category: str | None = None, query: str = "",
+               log_retrieval: bool = True) -> list[dict[str, Any]]:
         candidate_count = max(top_k, min(top_k * 100, 1000))
         with self.conn, self.conn.cursor() as cur:
             cur.execute("""SELECT d.document_id,d.title,c.content,d.category,d.source_url,d.version,c.metadata,
@@ -99,5 +100,9 @@ class PgVectorKnowledgeBase(OperationsStore):
                 for row in rows:
                     row.pop("document_id", None)
                     row.pop("metadata", None)
-            cur.execute("INSERT INTO knowledge_retrieval_log VALUES(%s,%s,%s)", (str(uuid.uuid4()),query,Json(rows)))
+            if log_retrieval:
+                cur.execute(
+                    "INSERT INTO knowledge_retrieval_log VALUES(%s,%s,%s)",
+                    (str(uuid.uuid4()), query, Json(rows)),
+                )
             return rows
