@@ -1,6 +1,7 @@
 import re
 import hmac
 import uuid
+from time import sleep
 from datetime import datetime, timezone
 
 from psycopg2 import sql
@@ -171,19 +172,25 @@ class RepairWorkflow:
                             sql.SQL("ANALYZE {}").format(_identifier(table))
                         )
                     conn.commit()
-                    post_stats = self._read_data_node_stats(conn, schema_name, table_name)
-                    current_by_node = {
-                        item["node_name"]: item["last_analyze"] for item in post_stats["nodes"]
-                    }
-                    advanced_nodes = [
-                        node_name for node_name, previous in previous_by_node.items()
-                        if node_name in current_by_node and current_by_node[node_name]
-                        and (previous is None or current_by_node[node_name] > previous)
-                    ]
-                    advanced = (
-                        current_by_node.keys() == previous_by_node.keys()
-                        and len(advanced_nodes) == len(previous_by_node)
-                    )
+                    # The statistics collector can publish updates after ANALYZE commits.
+                    for delay in (0, 0.5, 1, 2):
+                        if delay:
+                            sleep(delay)
+                        post_stats = self._read_data_node_stats(conn, schema_name, table_name)
+                        current_by_node = {
+                            item["node_name"]: item["last_analyze"] for item in post_stats["nodes"]
+                        }
+                        advanced_nodes = [
+                            node_name for node_name, previous in previous_by_node.items()
+                            if node_name in current_by_node and current_by_node[node_name]
+                            and (previous is None or current_by_node[node_name] > previous)
+                        ]
+                        advanced = (
+                            current_by_node.keys() == previous_by_node.keys()
+                            and len(advanced_nodes) == len(previous_by_node)
+                        )
+                        if advanced:
+                            break
                     result = {
                         "success": advanced,
                         "operation": operation,
