@@ -1,11 +1,42 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
-from backend.collectors.readonly_health import ReadonlyHealthCollector
+from backend.collectors.readonly_health import CHECKS, ReadonlyHealthCollector
 from backend.ai.agent_client import AIOpsAgent
 
 
 class NodeConnectivityTests(unittest.TestCase):
+    def test_bulk_limit_preserves_partial_status_and_collects_configured_table(self):
+        target = "public.orders"
+        collector = ReadonlyHealthCollector(SimpleNamespace(AIOPS_AUTO_AUDIT_TARGETS=[target]))
+        nodes = [
+            {"node_name": "dn0001", "node_type": "D"},
+            {"node_name": "dn0002", "node_type": "D"},
+        ]
+        limits = {f"data_node_stats:{node['node_name']}": {"type": "CollectionLimit"} for node in nodes}
+        targeted = [{"schemaname": "public", "tablename": "orders", "nodes": nodes}]
+        with patch("backend.collectors.readonly_health.OpenTenBaseConnector") as connector, patch.object(
+            collector, "_probe_node_connectivity", return_value=[]
+        ), patch.object(
+            collector, "_collect_data_node_prepared_xacts", return_value=([], {})
+        ), patch.object(
+            collector, "_collect_data_node_stats", side_effect=[([], limits), (targeted, {})]
+        ) as stats:
+            connection = connector.return_value.connect.return_value
+            cursor = connection.cursor.return_value.__enter__.return_value
+            cursor.fetchall.side_effect = [nodes if name == "nodes" else [] for name in CHECKS]
+            snapshot = collector.collect()
+
+        self.assertEqual(stats.call_args_list, [
+            call(connection, nodes, table=None), call(connection, nodes, table=target),
+        ])
+        self.assertEqual(snapshot["status"], "partial")
+        self.assertEqual(snapshot["errors"], limits)
+        self.assertEqual(snapshot["checks"]["data_node_stats_fallback"], {
+            target: {"tables": targeted, "errors": {}},
+        })
+
     @patch("backend.collectors.readonly_health.socket.create_connection")
     def test_reports_reachable_and_unreachable_registered_nodes(self, connect):
         connect.side_effect = [MagicMock(), OSError("connection refused")]
