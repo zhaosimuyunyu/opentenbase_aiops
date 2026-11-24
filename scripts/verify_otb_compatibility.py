@@ -136,9 +136,7 @@ def main() -> int:
                 with connection.cursor() as cursor:
                     cursor.execute("SET LOCAL statement_timeout = '1500ms'")
                     cursor.execute("SET LOCAL lock_timeout = '300ms'")
-                    cursor.execute(
-                        "SELECT to_regprocedure('public.pg_clean_check_txn(integer)') IS NOT NULL"
-                    )
+                    cursor.execute(CHECKS["pg_clean_diagnostics"])
                     available = cursor.fetchone()[0]
                 report["pg_clean_diagnostics"] = {
                     "status": "registered" if available else "missing",
