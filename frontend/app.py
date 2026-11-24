@@ -395,6 +395,21 @@ elif page == "🧾 修复审批":
                 if item.get("result") is not None:
                     st.write("已保存的处置结果")
                     st.json(item["result"])
+                if item.get("manual_review"):
+                    st.write("人工复核记录")
+                    st.json(item["manual_review"])
+                elif item["status"] in {"executing", "unverified"}:
+                    with st.form(f"review-{item['request_id']}"):
+                        note = st.text_area("复核结论与依据", max_chars=4000)
+                        review_token = st.text_input("审批令牌", type="password")
+                        if st.form_submit_button("保存复核记录"):
+                            response = requests.post(
+                                f"{api_base}/api/repairs/{item['request_id']}/manual-review",
+                                json={"note": note, "token": review_token}, timeout=10,
+                            )
+                            if response.ok:
+                                st.rerun()
+                            st.error(response.text)
                 if item["status"] == "pending":
                     approver = st.session_state.config.AIOPS_APPROVER_ID
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")

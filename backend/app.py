@@ -462,6 +462,24 @@ def reject_repair_request(request_id: str, request: RepairRejectionRequest):
         raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
 
 
+class RepairManualReviewRequest(BaseModel):
+    note: str
+    token: str
+
+
+@app.post("/api/repairs/{request_id}/manual-review")
+def record_repair_manual_review(request_id: str, request: RepairManualReviewRequest):
+    try:
+        return RepairWorkflow().record_manual_review(request_id, request.note, request.token)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to record manual repair review")
+        raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=config.APP_HOST, port=8000)

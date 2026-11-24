@@ -42,6 +42,7 @@ class RepairWorkflow:
                 result jsonb, audit_id text, finding jsonb)""")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS audit_id text")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS finding jsonb")
+            cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS manual_review jsonb")
 
     @staticmethod
     def _read_data_node_stats(connection, schema_name, table_name, *, keep_transaction=False):
@@ -301,13 +302,38 @@ class RepairWorkflow:
         finally:
             kb.close()
 
+    def record_manual_review(self, request_id, note, token):
+        self._authorize_decision(token)
+        note = note.strip()
+        if not 1 <= len(note) <= 4000:
+            raise ValueError("Review note must contain 1 to 4000 characters")
+        kb = PgVectorKnowledgeBase()
+        try:
+            self._ensure_schema(kb)
+            with kb.conn, kb.conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE repair_requests
+                       SET manual_review=jsonb_build_object(
+                           'note', %s::text, 'reviewer', %s::text, 'reviewed_at', now())
+                       WHERE request_id=%s AND status IN ('executing', 'unverified')
+                         AND manual_review IS NULL
+                       RETURNING manual_review""",
+                    (note, self.config.AIOPS_APPROVER_ID, request_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ValueError("Repair request is not awaiting manual review")
+                return {"request_id": request_id, "manual_review": row[0]}
+        finally:
+            kb.close()
+
     def list_requests(self, limit=50):
         kb = PgVectorKnowledgeBase()
         try:
             self._ensure_schema(kb)
             with kb.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT request_id,operation,parameters,evidence,reason,status,created_at,approved_at,approved_by,result,audit_id,finding "
+                    "SELECT request_id,operation,parameters,evidence,reason,status,created_at,approved_at,approved_by,result,audit_id,finding,manual_review "
                     "FROM repair_requests ORDER BY created_at DESC LIMIT %s",
                     (max(1, min(limit, 100)),),
                 )
