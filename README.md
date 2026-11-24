@@ -174,7 +174,10 @@ conn = psycopg2.connect(
 ```powershell
 docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py
 docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --table public.orders
+docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --repair-account --table public.orders
 ```
+
+第三条命令使用配置的独立执行账号进行只读探测。它验证连接和逐 DN 统计读取权限，实际表锁与 `ANALYZE` 权限需要通过隔离表执行验收。
 
 使用报告中的 `summary` 判断探测结果。节点可达且 CN 可连接时，统计查询仍可能失败。请查看具体失败项和错误原因。兼容性探测和全库巡检的验收范围见 [OpenTenBase 兼容性记录](docs/OTB_COMPATIBILITY.md)。
 

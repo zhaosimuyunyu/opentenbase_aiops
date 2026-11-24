@@ -33,10 +33,17 @@ PROBES = {
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--table", help="Also verify targeted data-node statistics for schema.table")
+    parser.add_argument("--repair-account", action="store_true",
+                        help="Probe with the configured repair login using read-only queries")
     args = parser.parse_args()
     if args.table and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", args.table):
         parser.error("--table must use schema.table format")
     config = Config()
+    if args.repair_account:
+        if not config.AIOPS_REPAIR_DB_USER:
+            parser.error("--repair-account requires AIOPS_REPAIR_DB_USER")
+        config.DB_USER = config.AIOPS_REPAIR_DB_USER
+        config.DB_PASSWORD = config.AIOPS_REPAIR_DB_PASSWORD
     report = {
         "target": {"host": config.DB_HOST, "port": config.DB_PORT, "database": config.DB_NAME, "user": config.DB_USER},
         "driver": "psycopg2",
