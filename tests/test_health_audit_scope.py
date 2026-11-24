@@ -6,6 +6,34 @@ from backend.engines.readonly_audit_engine import ReadonlyAuditEngine
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_fallback_preserves_critical_node_risk(self):
+        module = "backend.engines.readonly_audit_engine"
+        with patch(f"{module}.OperationsStore") as store, patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(
+            ReadonlyAuditEngine, "_diagnose",
+            new=AsyncMock(return_value={
+                "structured": {"risk_level": "unknown"},
+                "analysis_fallback": True,
+                "knowledge_refs": [],
+            }),
+        ):
+            collector.return_value.collect.return_value = {
+                "status": "partial",
+                "errors": {"node_connectivity:dn1": {"type": "NodeConnectivity"}},
+                "checks": {
+                    "nodes": [],
+                    "node_connectivity": [{
+                        "status": "unreachable", "node_name": "dn1",
+                        "node_type": "D", "host": "dn1", "port": 11006,
+                    }],
+                },
+            }
+            result = await ReadonlyAuditEngine().run_health_audit(trigger="scheduled")
+            cursor = store.return_value.conn.cursor.return_value.__enter__.return_value
+            self.assertEqual(cursor.execute.call_args.args[1][-1], "critical")
+        self.assertEqual(result["risk_level"], "critical")
+
     async def test_connection_capacity_distinguishes_zero_from_collection_failure(self):
         module = "backend.engines.readonly_audit_engine"
         for count, limit, usage, severity in (
