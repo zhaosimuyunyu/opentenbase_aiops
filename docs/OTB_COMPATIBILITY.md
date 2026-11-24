@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+在隔离 CN、DN 和 GTM 上，对复制表写入后创建显式预备事务。官方诊断报告 CN 和 DN 均为 `TXN_STATUS_PREPARED`，全局状态为 `TXN_STATUS_ABORTED`。恢复函数在此构建中要求事务至少达到 10 秒，达到阈值后执行 `pg_clean_execute(10)` 返回 `ABORT / success`。分别在 CN 和 DN 查询 `pg_prepared_xacts`，测试 GID 均已消失，测试表的行数为 0。测试表和节点组已清理，隔离进程已停止。本次验证覆盖回滚路径，现场带持久化提交时间戳的事务需要单独验证提交恢复路径。
+
 带事务的隔离验收使用显式 `PREPARE TRANSACTION` 创建测试 GID。立即调用 `pg_clean_check_txn(120)` 返回空结果。等待 5 秒后改用 `pg_clean_check_txn(3)`，诊断返回该 GID 和 `TXN_STATUS_COMMITTED`，同时报告缺少全局追踪 ID。诊断后，该 GID 仍在 `pg_prepared_xacts` 中，随后使用 `ROLLBACK PREPARED` 清理测试事务。此结果验证了诊断能够发现达到检查年龄的预备事务。恢复验收须逐节点确认实际事务状态。这笔测试事务也未复现现场的跨节点提交故障。
 
 隔离拓扑中已注册并调用官方 `pg_clean_check_txn` 及诊断所需的辅助函数，后台清理器保持关闭。诊断会按 `pgxc_node` 连接 CN 自身，因此临时 CN 的目录端口需从默认 `5432` 改为实际监听的 `19147`，并启用本地 TCP 监听。修正后，`pg_clean_check_txn(120)` 在无预备事务的隔离拓扑上成功返回空结果。临时进程已停止，带预备事务的诊断和恢复仍待验证。
