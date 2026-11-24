@@ -141,7 +141,11 @@ class ClusterCollector(BaseCollector):
         LIMIT 50;
         """
         try:
-            tables = self.db.execute_query(sql)
+            with self.db.get_cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = '2500ms'")
+                cursor.execute("SET LOCAL lock_timeout = '750ms'")
+                cursor.execute(sql)
+                tables = cursor.fetchall()
 
             # Count by distribution type
             type_counts = {}

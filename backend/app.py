@@ -355,7 +355,9 @@ def list_audits(
                           evidence->>'trigger' AS trigger,
                           evidence->>'statistics_target' AS statistics_target,
                           jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
-                          jsonb_array_length(COALESCE(knowledge_refs, '[]'::jsonb)) AS reference_count
+                          CASE WHEN jsonb_typeof(knowledge_refs) = 'array'
+                               THEN jsonb_array_length(knowledge_refs)
+                               ELSE 0 END AS reference_count
                    FROM audit_records
                    WHERE (%s::text IS NULL OR audit_type=%s)
                      AND (%s::text IS NULL OR risk_level = ANY(%s))
