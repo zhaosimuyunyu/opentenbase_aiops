@@ -292,9 +292,11 @@ class RepairWorkflow:
                             if node_name in current_by_node and current_by_node[node_name]
                             and (previous is None or current_by_node[node_name] > previous)
                         ]
+                        post_relations = {
+                            item["node_name"]: item["relation_oid"] for item in post_stats["nodes"]
+                        }
                         advanced = (
-                            {item["node_name"]: item["relation_oid"] for item in post_stats["nodes"]}
-                            == current_relations
+                            post_relations == current_relations
                             and len(advanced_nodes) == len(previous_by_node)
                         )
                         if advanced:
@@ -316,6 +318,7 @@ class RepairWorkflow:
                             ],
                         },
                         "postcondition": {
+                            "relation_oid_by_node": post_relations,
                             "last_analyze_by_node": {
                                 node_name: timestamp.isoformat() if timestamp else None
                                 for node_name, timestamp in current_by_node.items()
