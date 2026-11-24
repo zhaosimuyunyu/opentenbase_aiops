@@ -483,11 +483,22 @@ elif page == "🧾 修复审批":
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)
                     if left.button("批准并执行", key=f"approve-{item['request_id']}"):
-                        response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/approve", json={"approver": approver, "token": token}, timeout=30)
-                        if response.ok:
-                            st.session_state.repair_decision = response.json()
-                            st.rerun()
-                        st.error(response.text)
+                        try:
+                            response = requests.post(
+                                f"{api_base}/api/repairs/{item['request_id']}/approve",
+                                json={"approver": approver, "token": token},
+                                timeout=30,
+                            )
+                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                            st.warning(
+                                f"未收到审批结果（请求 {item['request_id']}）。"
+                                "服务端可能仍在执行，请先刷新审批队列并核对状态。"
+                            )
+                        else:
+                            if response.ok:
+                                st.session_state.repair_decision = response.json()
+                                st.rerun()
+                            st.error(response.text)
                     reject_reason = right.text_input("拒绝原因", key=f"r-{item['request_id']}")
                     if right.button("拒绝", key=f"reject-{item['request_id']}"):
                         response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/reject", json={"approver": approver, "reason": reject_reason, "token": token}, timeout=10)
