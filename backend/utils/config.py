@@ -32,6 +32,7 @@ class Config:
     APP_PORT: int = int(os.getenv("APP_PORT", "8080"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     AIOPS_APPROVAL_TOKEN: str = os.getenv("AIOPS_APPROVAL_TOKEN", "")
+    AIOPS_APPROVER_TOKENS: str = os.getenv("AIOPS_APPROVER_TOKENS", "")
     AIOPS_APPROVER_ID: str = os.getenv("AIOPS_APPROVER_ID", "local-operator")
     AIOPS_AUTO_AUDIT_ENABLED: bool = (
         os.getenv("AIOPS_AUTO_AUDIT_ENABLED", "false").lower()

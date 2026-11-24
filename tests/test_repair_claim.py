@@ -5,9 +5,24 @@ from backend.engines.repair_workflow import RepairWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_individual_tokens_bind_identity_and_disable_shared_token(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS='{"alice":"first","bob":"second"}',
+            AIOPS_APPROVAL_TOKEN="shared",
+        )
+        self.assertEqual(workflow._authorize_decision("first"), "alice")
+        self.assertEqual(workflow._authorize_decision("second"), "bob")
+        with self.assertRaises(PermissionError):
+            workflow._authorize_decision("shared")
+        for invalid in ('{"alice":"first","bob":"first"}', '{"alice":"first","alice":"second"}'):
+            workflow.config.AIOPS_APPROVER_TOKENS = invalid
+            with self.assertRaises(PermissionError):
+                workflow._authorize_decision("first")
+
     def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
-        workflow.config = MagicMock(AIOPS_APPROVAL_TOKEN="test-token")
+        workflow.config = MagicMock(AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token")
         with patch("backend.engines.repair_workflow.OperationsStore") as store:
             with self.assertRaises(PermissionError):
                 workflow.reject("request-1", "operator", "reason", "wrong-token")
@@ -15,7 +30,7 @@ class RepairClaimTests(unittest.TestCase):
 
     def test_interrupted_execution_cannot_be_claimed_again(self):
         workflow = RepairWorkflow()
-        workflow.config = MagicMock(AIOPS_APPROVAL_TOKEN="test-token", AIOPS_APPROVER_ID="configured-operator")
+        workflow.config = MagicMock(AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token", AIOPS_APPROVER_ID="configured-operator")
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value
         parameters = {"table": "public.orders"}

@@ -1,5 +1,6 @@
 import re
 import hmac
+import json
 import uuid
 from time import sleep
 from datetime import datetime, timezone
@@ -130,14 +131,35 @@ class RepairWorkflow:
         return {"request_id": request_id, "status": "pending", "operation": operation, "parameters": params}
 
     def _authorize_decision(self, token):
+        configured = self.config.AIOPS_APPROVER_TOKENS
+        if configured:
+            try:
+                credentials = json.loads(configured, object_pairs_hook=list)
+                if not credentials or not all(
+                    isinstance(pair, tuple) and len(pair) == 2
+                    and all(isinstance(value, str) and value.strip() for value in pair)
+                    for pair in credentials
+                ):
+                    raise ValueError
+                if any(len(set(values)) != len(credentials) for values in zip(*credentials)):
+                    raise ValueError
+            except (ValueError, TypeError):
+                raise PermissionError("Approver credentials are misconfigured") from None
+            matches = [
+                actor for actor, secret in credentials
+                if hmac.compare_digest((token or "").encode(), secret.encode())
+            ]
+            if matches:
+                return matches[0]
+            raise PermissionError("Approval token is invalid")
         if not self.config.AIOPS_APPROVAL_TOKEN or not hmac.compare_digest(
             (token or "").encode(), self.config.AIOPS_APPROVAL_TOKEN.encode()
         ):
             raise PermissionError("Approval token is not configured or is invalid")
+        return self.config.AIOPS_APPROVER_ID
 
     def approve_and_execute(self, request_id, approver, token):
-        self._authorize_decision(token)
-        approver = self.config.AIOPS_APPROVER_ID
+        approver = self._authorize_decision(token)
         kb = OperationsStore()
         try:
             self._ensure_schema(kb)
@@ -285,8 +307,7 @@ class RepairWorkflow:
             kb.close()
 
     def reject(self, request_id, approver, reason, token):
-        self._authorize_decision(token)
-        approver = self.config.AIOPS_APPROVER_ID
+        approver = self._authorize_decision(token)
         kb = OperationsStore()
         try:
             self._ensure_schema(kb)
@@ -303,7 +324,7 @@ class RepairWorkflow:
             kb.close()
 
     def record_manual_review(self, request_id, note, token):
-        self._authorize_decision(token)
+        reviewer = self._authorize_decision(token)
         note = note.strip()
         if not 1 <= len(note) <= 4000:
             raise ValueError("Review note must contain 1 to 4000 characters")
@@ -318,7 +339,7 @@ class RepairWorkflow:
                        WHERE request_id=%s AND status IN ('executing', 'unverified')
                          AND manual_review IS NULL
                        RETURNING manual_review""",
-                    (note, self.config.AIOPS_APPROVER_ID, request_id),
+                    (note, reviewer, request_id),
                 )
                 row = cur.fetchone()
                 if row is None:
