@@ -256,17 +256,20 @@ def get_automation_status():
                 records = cursor.fetchall()
                 latest = records[0] if records else None
                 latest_by_scope = {row["scope"]: dict(row) for row in records}
-                for table in config.AIOPS_AUTO_AUDIT_TARGETS:
-                    cursor.execute(
-                        "SELECT created_at, evidence->>'collection_status' AS collection_status FROM audit_records "
-                        "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled' "
-                        "AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text "
-                        "ORDER BY created_at DESC, audit_id DESC LIMIT 1",
-                        (table,),
-                    )
-                    scheduled_targets.append({
-                        "table": table, **(cursor.fetchone() or {"created_at": None, "collection_status": None})
-                    })
+                cursor.execute(
+                    """SELECT target.name AS "table", audit.created_at, audit.collection_status
+                       FROM unnest(%s::text[]) WITH ORDINALITY AS target(name, position)
+                       LEFT JOIN LATERAL (
+                           SELECT created_at, evidence->>'collection_status' AS collection_status
+                           FROM audit_records
+                           WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled'
+                             AND (evidence->>'statistics_target') IS NOT DISTINCT FROM target.name
+                           ORDER BY created_at DESC, audit_id DESC LIMIT 1
+                       ) AS audit ON true
+                       ORDER BY target.position""",
+                    (list(config.AIOPS_AUTO_AUDIT_TARGETS),),
+                )
+                scheduled_targets = [dict(row) for row in cursor.fetchall()]
                 if scheduled_targets and all(row["created_at"] for row in scheduled_targets):
                     latest_scheduled_at = min(row["created_at"] for row in scheduled_targets)
                 statuses = {row["collection_status"] for row in scheduled_targets}
