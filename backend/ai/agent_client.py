@@ -7,7 +7,11 @@ from ..tools.knowledge_search_tool import TOOL_SCHEMA, execute_search_knowledge
 
 def _model_evidence(value):
     if isinstance(value, dict):
-        return {key: _model_evidence(item) for key, item in value.items() if key != "query"}
+        return {
+            key: _model_evidence(item)
+            for key, item in value.items()
+            if key not in {"query", "message"}
+        }
     if isinstance(value, (list, tuple)):
         return [_model_evidence(item) for item in value]
     return value
