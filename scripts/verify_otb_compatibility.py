@@ -131,6 +131,24 @@ def main() -> int:
                 "table_count": len(tables),
                 "errors": errors,
             }
+        if not args.repair_account:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '1500ms'")
+                    cursor.execute("SET LOCAL lock_timeout = '300ms'")
+                    cursor.execute(
+                        "SELECT to_regprocedure('public.pg_clean_check_txn(integer)') IS NOT NULL"
+                    )
+                    available = cursor.fetchone()[0]
+                report["pg_clean_diagnostics"] = {
+                    "status": "registered" if available else "missing",
+                }
+            except psycopg2.Error as error:
+                report["pg_clean_diagnostics"] = {
+                    "status": "unknown", "sqlstate": error.pgcode,
+                }
+            finally:
+                connection.rollback()
         if args.repair_lock:
             connection.set_session(readonly=False)
             try:
