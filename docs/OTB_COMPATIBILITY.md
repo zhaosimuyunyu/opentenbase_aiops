@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+对应构建 `b612d77cb` 的 `contrib/pg_clean/pg_clean.c` 中，`pg_clean_check_txn` 仅允许在 CN 调用，以 `execute = false` 进入状态收集流程，并枚举数据库及 CN、DN 上的事务。诊断结果包含 GID、数据库、全局状态和各节点状态。调用范围覆盖集群，连接到 `lab` 并不能将诊断限制到该库。扩展的恢复入口由独立的 `pg_clean_execute*` 函数提供。当前实测只覆盖动态库加载，尚未调用这些 SQL 函数。
+
 跨节点加载复测确认两个容器拥有独立的数据卷。将同一构建产物临时放在两个容器的相同路径并核对 SHA-256 后，通过 CN 的 `lab` 只读会话执行 `LOAD` 成功，随后回滚并关闭会话。DN2 上的临时副本已清理。扩展安装和两阶段事务恢复仍待验证。
 
 使用同版本编译的 `pg_clean.so`，直连 DN1 的 `lab` 数据库，在只读事务中执行 `LOAD` 成功，随后回滚并关闭会话。经 CN 执行同一命令时返回 `58P01`。本地构建对应的 `src/backend/tcop/utility.c` 显示 CN 会将 `LOAD` 下发到 DN，本次临时动态库只编译在 DN1 所在容器。此测试验证了 DN1 的动态加载，跨节点加载及恢复行为仍待验证。
