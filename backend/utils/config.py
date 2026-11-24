@@ -19,6 +19,10 @@ class Config:
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")  # 可选，容器内 Unix socket 可能不需要
     DB_TYPE: str = os.getenv("DB_TYPE", "postgresql")  # 参考 AgentX
 
+    @property
+    def audit_target(self):
+        return {"host": self.DB_HOST, "port": self.DB_PORT, "database": self.DB_NAME}
+
     # DeepSeek API (OpenAI-compatible)
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_API_BASE: str = os.getenv(

@@ -16,7 +16,7 @@ from .collectors.performance import PerformanceCollector
 from .ai.llm_client import DeepSeekClient
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .utils.operations_store import OperationsStore
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
 
@@ -250,8 +250,10 @@ def get_automation_status():
                                CASE WHEN evidence->>'statistics_target' IS NULL
                                     THEN 'full' ELSE 'targeted' END AS scope
                         FROM audit_records WHERE audit_type='readonly_health_audit'
+                          AND evidence->'audit_target' = %s::jsonb
                         ORDER BY scope, created_at DESC, audit_id DESC
-                    ) AS scoped ORDER BY created_at DESC, audit_id DESC"""
+                    ) AS scoped ORDER BY created_at DESC, audit_id DESC""",
+                    (Json(config.audit_target),),
                 )
                 records = cursor.fetchall()
                 latest = records[0] if records else None
@@ -265,11 +267,12 @@ def get_automation_status():
                                   ai_analysis->'analysis_fallback' = 'true'::jsonb AS analysis_fallback
                            FROM audit_records
                            WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled'
+                             AND evidence->'audit_target' = %s::jsonb
                              AND COALESCE(evidence->>'statistics_target', '') = COALESCE(target.name, '')
                            ORDER BY created_at DESC, audit_id DESC LIMIT 1
                        ) AS audit ON true
                        ORDER BY target.position""",
-                    (list(config.AIOPS_AUTO_AUDIT_TARGETS),),
+                    (list(config.AIOPS_AUTO_AUDIT_TARGETS), Json(config.audit_target)),
                 )
                 scheduled_targets = [dict(row) for row in cursor.fetchall()]
                 if scheduled_targets and all(row["created_at"] for row in scheduled_targets):

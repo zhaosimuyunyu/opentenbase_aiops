@@ -20,6 +20,9 @@ def _ensure_audit_schema(cursor):
 
 
 class ReadonlyAuditEngine:
+    def __init__(self, config=None):
+        self.config = config or Config()
+
     @staticmethod
     async def _diagnose(issue, evidence):
         try:
@@ -88,7 +91,7 @@ class ReadonlyAuditEngine:
 
     async def run_health_audit(self, *, trigger="manual", table=None):
         """Run read-only checks across cluster, capacity, locks, and query health."""
-        snapshot = ReadonlyHealthCollector(Config()).collect(table=table)
+        snapshot = ReadonlyHealthCollector(self.config).collect(table=table)
         checks = snapshot['checks']
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info', 'database_identity',
@@ -291,6 +294,7 @@ class ReadonlyAuditEngine:
         evidence = {
             'trigger': trigger,
             'statistics_target': table,
+            'audit_target': self.config.audit_target,
             'collection_status': snapshot['status'],
             'cluster_status': cluster_status,
             'performance_status': performance_status,

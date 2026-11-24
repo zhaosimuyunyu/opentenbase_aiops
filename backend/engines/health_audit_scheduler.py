@@ -1,4 +1,5 @@
 import asyncio
+from psycopg2.extras import Json
 from starlette.concurrency import run_in_threadpool
 
 from ..utils.operations_store import OperationsStore
@@ -41,17 +42,18 @@ class HealthAuditScheduler:
                                 SELECT 1 FROM audit_records
                                 WHERE audit_type = 'readonly_health_audit'
                                   AND evidence->>'trigger' = 'scheduled'
+                                  AND evidence->'audit_target' = %s::jsonb
                                   AND COALESCE(evidence->>'statistics_target', '') = COALESCE(%s::text, '')
                                   AND created_at > now() - make_interval(secs => %s)
                             )""",
-                            (table, self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS),
+                            (Json(self.config.audit_target), table, self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS),
                         )
                         if cursor.fetchone()[0]:
                             return None
                 kb.conn.commit()
             trigger = "scheduled" if scheduled else "manual"
             options = {"table": table} if table else {}
-            return asyncio.run(ReadonlyAuditEngine().run_health_audit(trigger=trigger, **options))
+            return asyncio.run(ReadonlyAuditEngine(self.config).run_health_audit(trigger=trigger, **options))
         finally:
             if acquired and not kb.conn.closed:
                 try:
