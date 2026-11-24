@@ -1,0 +1,255 @@
+# OpenTenBase AIOps Platform
+
+![OpenTenBase AIOps](https://img.shields.io/badge/OpenTenBase-AIOps-blue)
+![Python](https://img.shields.io/badge/Python-3.11+-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
+基于 AI 的 OpenTenBase 分布式数据库智能运维平台
+
+## ✨ 功能特性
+
+- 🤖 **智能问答助手** - 基于 DeepSeek 大模型的数据库问题诊断
+- 📊 **健康监控** - 实时集群状态监控和健康巡检
+- 🔍 **性能诊断** - 锁分析、慢查询检测、表统计
+- 🎯 **分布式特性** - 针对 OpenTenBase 分布式架构的专项诊断
+- 📈 **可视化报告** - 清晰的 Web 界面和数据展示
+
+## 🏗️ 架构
+
+```
+┌─────────────────┐
+│   Streamlit UI  │ (Port 8080)
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│   FastAPI       │ (Port 8000, Optional)
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│   Collectors    │
+│   - Cluster     │
+│   - Performance │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  DeepSeek LLM   │
+│  (AI Engine)    │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  OpenTenBase    │
+│   (容器化部署)   │
+└─────────────────┘
+```
+
+## 🚀 快速开始
+
+### 前置条件
+
+- Docker & Docker Compose
+- 已运行的 OpenTenBase 集群（容器化）
+- DeepSeek API Key
+
+### 1. 环境配置
+
+```bash
+# 克隆项目
+cd E:\opentenbase\kaiyuan_contribute\opentenbase-aiops
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，填入 DeepSeek API Key
+```
+
+### 2. 容器化部署
+
+```bash
+# 构建镜像
+docker-compose build
+
+# 启动服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+```
+
+### 3. 访问服务
+
+- **Web UI**: http://localhost:8088
+- **API 文档**: http://localhost:8000/docs (可选)
+
+## 📦 项目结构
+
+```
+opentenbase-aiops/
+├── backend/                 # 后端代码
+│   ├── collectors/         # 数据采集模块
+│   │   ├── base.py        # 基础采集器
+│   │   ├── cluster.py     # 集群状态采集
+│   │   └── performance.py # 性能指标采集
+│   ├── ai/                # AI 模块
+│   │   ├── llm_client.py  # DeepSeek 客户端
+│   │   └── knowledge_base.py # 知识库
+│   ├── utils/             # 工具类
+│   │   ├── config.py      # 配置管理
+│   │   ├── db_connector.py # 数据库连接
+│   │   └── logger.py      # 日志
+│   └── app.py             # FastAPI 应用
+├── frontend/              # 前端代码
+│   └── app.py            # Streamlit 应用
+├── data/                 # 数据目录
+│   ├── knowledge_base/   # 知识库
+│   └── embeddings/       # 向量数据
+├── docker-compose.yml    # Docker Compose 配置
+├── Dockerfile            # Docker 镜像
+├── requirements.txt      # Python 依赖
+└── README.md            # 本文件
+```
+
+## 🔧 配置说明
+
+### 环境变量
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `DB_HOST` | OpenTenBase 主机 | `otb-node1` |
+| `DB_PORT` | OpenTenBase 端口 | `11003` |
+| `DB_USER` | 数据库用户 | `opentenbase` |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key | **必填** |
+| `DEEPSEEK_API_BASE` | API 端点 | `https://api.deepseek.com/v1` |
+| `DEEPSEEK_MODEL` | 模型名称 | `deepseek-chat` |
+
+### OpenTenBase 连接
+
+项目通过 **psycopg2** 连接 OpenTenBase：
+
+```python
+# 容器内直接连接
+conn = psycopg2.connect(
+    host="otb-node1",
+    port=11003,
+    user="opentenbase",
+    dbname="postgres"
+)
+```
+
+**重要**: AIOps 容器需要加入 OpenTenBase 的 Docker 网络 (`otb-lab-net`)
+
+## 📚 使用指南
+
+### 健康监控
+
+1. 进入 "📊 健康监控" 页面
+2. 查看集群节点、连接数、复制状态
+3. 点击 "生成健康报告" 获取 AI 分析
+
+### 智能问答
+
+1. 进入 "💬 智能问答" 页面
+2. 输入问题，例如：
+   - "如何优化慢查询？"
+   - "主从延迟过高怎么办？"
+   - "连接数快满了怎么处理？"
+3. AI 会结合当前集群状态给出诊断和建议
+
+### 性能诊断
+
+1. 进入 "🔍 性能诊断" 页面
+2. 选择诊断维度：
+   - **锁分析**: 检测死锁和阻塞
+   - **长查询**: 发现性能瓶颈
+   - **表统计**: 分析表使用情况
+
+## 🛠️ 开发指南
+
+### 本地开发
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动 Streamlit (开发模式)
+streamlit run frontend/app.py --server.port 8080
+
+# 启动 FastAPI (可选)
+uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 添加新功能
+
+1. **新采集器**: 在 `backend/collectors/` 创建新模块
+2. **新 AI 功能**: 在 `backend/ai/` 扩展 LLM 客户端
+3. **新页面**: 在 `frontend/pages/` 添加新页面
+
+## 🧪 测试
+
+```bash
+# 运行测试
+pytest tests/
+
+# 测试数据库连接
+python scripts/test_connection.py
+```
+
+## 📖 API 文档
+
+启动服务后访问: http://localhost:8000/docs
+
+主要端点：
+- `GET /health` - 健康检查
+- `GET /api/cluster/status` - 集群状态
+- `GET /api/performance/metrics` - 性能指标
+- `POST /api/qa/ask` - 智能问答
+- `GET /api/health-report` - 健康报告
+
+## 🎯 特色功能
+
+### 分布式诊断
+
+针对 OpenTenBase 分布式特性的专项诊断：
+
+- ✅ 跨节点协调问题检测
+- ✅ 全局事务死锁分析
+- ✅ 分片分布不均衡检测
+- ✅ 分布式查询优化建议
+
+### AI 驱动
+
+- 🤖 基于 DeepSeek 的智能推理
+- 📚 可扩展的知识库系统
+- 🎯 上下文感知的问题诊断
+- 💡 可解释的优化建议
+
+## 🤝 贡献指南
+
+欢迎贡献到 OpenTenBase AIOps 项目！
+
+1. Fork 本项目
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+## 📄 License
+
+MIT License
+
+## 👥 作者
+
+OpenTenBase AIOps 开发团队
+
+## 🙏 致谢
+
+- [OpenTenBase](https://github.com/OpenTenBase/OpenTenBase) - 企业级分布式 HTAP 数据库
+- [DeepSeek](https://www.deepseek.com/) - AI 大模型支持
+- [Streamlit](https://streamlit.io/) - 快速构建数据应用
+
+## 📮 联系方式
+
+- 提交 Issue: [GitHub Issues](https://github.com/OpenTenBase/AIOPS/issues)
+- 邮箱: devingeng@tencent.com
+
+---
+
+⭐ 如果这个项目对您有帮助，请给我们一个 Star！

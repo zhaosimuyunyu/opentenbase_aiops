@@ -1,0 +1,6 @@
+.env
+.env.*
+config.json
+scripts/test_simple.py
+.git
+__pycache__

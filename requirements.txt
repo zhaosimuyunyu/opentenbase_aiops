@@ -1,0 +1,24 @@
+# Core Dependencies
+streamlit==1.31.0
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+
+# LLM & AI (轻量级)
+openai==1.12.0  # DeepSeek uses OpenAI-compatible API
+httpx==0.27.2  # OpenAI 1.12 still passes the proxies argument
+
+# Data Processing
+pandas==2.2.0
+pyarrow==19.0.1  # Compatible with Streamlit 1.31's NumPy 1.x
+
+# Web Framework (optional, for REST API)
+fastapi==0.109.2
+uvicorn==0.27.1
+pydantic==2.6.1
+
+# Utilities
+pyyaml==6.0.1
+requests==2.31.0
+
+# Testing
+pytest==8.0.0

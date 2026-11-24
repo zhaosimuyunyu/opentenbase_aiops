@@ -1,0 +1,240 @@
+"""FastAPI application (optional REST API)"""
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+
+from .utils.config import Config
+from .utils.db_connector import OpenTenBaseConnector
+from .utils.logger import setup_logger
+from .collectors.cluster import ClusterCollector
+from .collectors.performance import PerformanceCollector
+from .ai.llm_client import DeepSeekClient
+from .engines.readonly_audit_engine import ReadonlyAuditEngine
+from .ai.knowledge_base_pgvector import PgVectorKnowledgeBase
+from psycopg2.extras import RealDictCursor
+
+logger = setup_logger(__name__)
+config = Config()
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="OpenTenBase AIOps API",
+    description="AI-powered operations platform for OpenTenBase",
+    version="0.1.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize components
+db_connector = OpenTenBaseConnector(config)
+cluster_collector = ClusterCollector(db_connector)
+performance_collector = PerformanceCollector(db_connector, config)
+llm_client = DeepSeekClient(config)
+
+
+class QuestionRequest(BaseModel):
+    question: str
+    include_context: bool = True
+
+
+class DiagnosisRequest(BaseModel):
+    description: str
+
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "service": "OpenTenBase AIOps",
+        "version": "0.1.0",
+        "status": "running"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    db_status = db_connector.test_connection()
+    return {
+        "api": "healthy",
+        "database": db_status
+    }
+
+
+@app.get("/api/cluster/status")
+async def get_cluster_status():
+    """Get cluster status"""
+    try:
+        result = cluster_collector.collect()
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get cluster status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/performance/metrics")
+async def get_performance_metrics():
+    """Get performance metrics"""
+    try:
+        result = performance_collector.collect()
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get performance metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/qa/ask")
+async def ask_question(request: QuestionRequest):
+    """Ask a question to the AI assistant"""
+    try:
+        context = None
+        if request.include_context:
+            # Get current cluster status as context
+            cluster_data = cluster_collector.collect()
+            context = f"当前集群状态：{cluster_data.get('data', {})}"
+
+        answer = llm_client.answer_question(
+            question=request.question,
+            context=context
+        )
+
+        return {
+            "question": request.question,
+            "answer": answer,
+            "context_included": request.include_context
+        }
+    except Exception as e:
+        logger.error(f"Failed to answer question: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/diagnosis")
+async def diagnose_issue(request: DiagnosisRequest):
+    """Diagnose database issue"""
+    try:
+        # Collect cluster and performance data
+        cluster_data = cluster_collector.collect().get('data', {})
+        performance_data = performance_collector.collect().get('data', {})
+
+        # Use AI to diagnose
+        diagnosis = llm_client.diagnose_issue(
+            issue_description=request.description,
+            cluster_data={**cluster_data, **performance_data}
+        )
+
+        return {
+            "description": request.description,
+            "diagnosis": diagnosis,
+            "cluster_data": cluster_data,
+            "performance_data": performance_data
+        }
+    except Exception as e:
+        logger.error(f"Failed to diagnose issue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/health-report")
+async def get_health_report():
+    """Generate AI-powered health report"""
+    try:
+        cluster_data = cluster_collector.collect().get('data', {})
+        performance_data = performance_collector.collect().get('data', {})
+
+        report = llm_client.generate_health_summary(
+            cluster_data=cluster_data,
+            performance_data=performance_data
+        )
+
+        return {
+            "report": report,
+            "cluster_data": cluster_data,
+            "performance_data": performance_data
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate health report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/audits/locks")
+async def run_readonly_lock_audit():
+    """Collect current locks, retrieve references, diagnose, and persist the audit."""
+    try:
+        return await ReadonlyAuditEngine().run_lock_audit()
+    except Exception as e:
+        logger.exception("Read-only lock audit failed")
+        raise HTTPException(status_code=503, detail="Read-only lock audit failed") from e
+
+
+@app.post("/api/audits/health")
+async def run_readonly_health_audit():
+    """Run and persist the read-only health audit."""
+    try:
+        return await ReadonlyAuditEngine().run_health_audit()
+    except Exception as e:
+        logger.exception("Read-only health audit failed")
+        raise HTTPException(status_code=503, detail="Read-only health audit failed") from e
+
+
+@app.get("/api/audits")
+async def list_audits(limit: int = 20, offset: int = 0, audit_type: Optional[str] = None):
+    """Return paginated audit summaries without exposing full SQL evidence."""
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    kb = PgVectorKnowledgeBase()
+    try:
+        with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """SELECT audit_id, audit_type, created_at, risk_level, status,
+                          evidence->>'collection_status' AS collection_status,
+                          jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
+                          jsonb_array_length(COALESCE(knowledge_refs, '[]'::jsonb)) AS reference_count
+                   FROM audit_records
+                   WHERE (%s IS NULL OR audit_type=%s)
+                   ORDER BY created_at DESC LIMIT %s OFFSET %s""",
+                (audit_type, audit_type, limit, offset),
+            )
+            records = [dict(row) for row in cursor.fetchall()]
+        return {"items": records, "limit": limit, "offset": offset}
+    except Exception as error:
+        logger.exception("Failed to list audit history")
+        raise HTTPException(status_code=503, detail="Audit history is unavailable") from error
+    finally:
+        kb.close()
+
+
+@app.get("/api/audits/{audit_id}")
+async def get_audit(audit_id: str):
+    """Return the stored evidence and diagnosis for one audit."""
+    kb = PgVectorKnowledgeBase()
+    try:
+        with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """SELECT audit_id, audit_type, created_at, risk_level, status,
+                          evidence, ai_analysis, knowledge_refs
+                   FROM audit_records WHERE audit_id=%s""",
+                (audit_id,),
+            )
+            record = cursor.fetchone()
+        if record is None:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        return dict(record)
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Failed to read audit")
+        raise HTTPException(status_code=503, detail="Audit record is unavailable") from error
+    finally:
+        kb.close()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host=config.APP_HOST, port=8000)
