@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+使用同版本编译的 `pg_clean.so`，直连 DN1 的 `lab` 数据库，在只读事务中执行 `LOAD` 成功，随后回滚并关闭会话。经 CN 执行同一命令时返回 `58P01`。本地构建对应的 `src/backend/tcop/utility.c` 显示 CN 会将 `LOAD` 下发到 DN，本次临时动态库只编译在 DN1 所在容器。此测试验证了 DN1 的动态加载，跨节点加载及恢复行为仍待验证。
+
 当前 CN 的 `version()`、安装目录的 `pg_config` 和本地 OpenTenBase 源码都指向构建提交 `b612d77cb`。将该版本的 `contrib/pg_clean` 复制到临时目录后，使用安装目录的 `pg_config` 和 `USE_PGXS=1` 成功构建 `pg_clean.so`。构建产物未安装到运行实例，加载和事务恢复仍待隔离环境验收。
 
 OpenTenBase v5.0 的后台清理器在查询待恢复事务前检查 `public.pg_clean_check_txn`。当前安装的 `pg_available_extensions` 中没有 `pg_clean`，CN 日志中多次出现 `create extension pg_clean please`。因此清理启动器虽已启用，当前部署缺少它所需的扩展。后续应先核对扩展与当前服务端构建的兼容性，再在隔离环境验证其只读诊断和恢复行为。 [OpenTenBase v5.0 后台清理源码](https://github.com/OpenTenBase/OpenTenBase/blob/v5.0/src/backend/postmaster/clean2pc.c)
