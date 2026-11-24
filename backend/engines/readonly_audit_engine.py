@@ -243,6 +243,7 @@ class ReadonlyAuditEngine:
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
                         'nodes': table_stat.get('nodes', []),
                         'database_identity': identity,
+                        'audit_target': self.config.audit_target,
                         'statistics_source': source,
                     },
                 })

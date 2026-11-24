@@ -189,6 +189,12 @@ class RepairWorkflow:
                 if finding.get("check") != "stale_table_statistics":
                     raise ValueError("ANALYZE requires a stale_table_statistics finding")
                 expected = finding.get("evidence") or {}
+                audited_target = expected.get("audit_target")
+                audited_database = (expected.get("database_identity") or {}).get("database")
+                if (audited_target and audited_target != self.config.audit_target) or (
+                    audited_database and audited_database != self.config.DB_NAME
+                ):
+                    raise ValueError("Repair request belongs to a different audit target")
                 if expected.get("schema") and expected.get("table"):
                     expected_table = f"{expected['schema']}.{expected['table']}"
                     if table != expected_table:
