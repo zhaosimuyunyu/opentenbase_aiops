@@ -127,6 +127,11 @@ opentenbase-aiops/
 
 ### Prometheus 告警
 
+审计库已有巡检记录后，可以用 `psql -v ON_ERROR_STOP=1 -f scripts/index_scheduled_audits.sql`
+在线建立调度查询索引。连接目标是审计 PostgreSQL，脚本须在事务块之外运行。
+如果建索引被中断，检查 `pg_index.indisvalid`。若索引无效，先用
+`DROP INDEX CONCURRENTLY audit_records_scheduled_target_idx` 清理该索引，再重跑脚本。
+
 仓库中的 `monitoring/prometheus.yml` 可用于同一 Docker 网络中的独立 Prometheus 实例。将它和 `aiops-alerts.yml` 放在实例的同一配置目录。
 
 示例将告警发给同一网络内的 `alertmanager:9093`。`monitoring/alertmanager.yml` 提供 webhook 路由，部署时将 `webhook_configs` 的 URL 改为实际接收端地址。

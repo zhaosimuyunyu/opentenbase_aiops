@@ -12,9 +12,6 @@ def _ensure_audit_schema(cursor):
         created_at timestamptz default now(), evidence jsonb not null,
         ai_analysis jsonb, knowledge_refs jsonb, risk_level text,
         status text default 'pending')""")
-    cursor.execute("""CREATE INDEX IF NOT EXISTS audit_records_scheduled_target_idx
-        ON audit_records ((COALESCE(evidence->>'statistics_target', '')), created_at DESC, audit_id DESC)
-        WHERE audit_type = 'readonly_health_audit' AND evidence->>'trigger' = 'scheduled'""")
 
 
 class ReadonlyAuditEngine:
