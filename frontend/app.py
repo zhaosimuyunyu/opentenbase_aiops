@@ -373,9 +373,13 @@ elif page == "📜 巡检历史":
         risks = {"全部": None, "高与严重": "high_or_critical", "仅严重": "critical"}
         risk = risks[st.selectbox("风险等级筛选", list(risks))]
         table_filter = st.text_input("目标表筛选", placeholder="public.orders").strip()
+        database_filter = st.text_input("数据库筛选", placeholder="postgres").strip()
         response = requests.get(
             f"{api_base}/api/audits",
-            params={"limit": 50, "risk": risk, "table": table_filter or None},
+            params={
+                "limit": 50, "risk": risk, "table": table_filter or None,
+                "database": database_filter or None,
+            },
             timeout=10,
         )
         response.raise_for_status()
@@ -383,15 +387,12 @@ elif page == "📜 巡检历史":
         items = history.get("items", [])
         if items:
             st.dataframe(items, use_container_width=True, hide_index=True)
-            selected_id = st.selectbox(
-                "查看审计详情",
-                [item["audit_id"] for item in items],
-                format_func=lambda value: next(
-                    f"{item.get('database') or '未知数据库'} · {item['audit_type']} · {item['created_at']}"
-                    for item in items
-                    if item["audit_id"] == value
-                ),
-            )
+            audit_options = {
+                f"{item.get('database') or '未知数据库'} · {item['audit_type']} · "
+                f"{item['created_at']} · {item['audit_id']}": item["audit_id"]
+                for item in items
+            }
+            selected_id = audit_options[st.selectbox("查看审计详情", list(audit_options))]
             if selected_id:
                 response = requests.get(f"{api_base}/api/audits/{selected_id}", timeout=10)
                 response.raise_for_status()

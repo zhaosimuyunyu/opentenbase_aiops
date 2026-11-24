@@ -343,6 +343,7 @@ def list_audits(
     audit_type: Optional[str] = None,
     risk: Optional[Literal["high_or_critical", "critical"]] = None,
     table: Optional[str] = Query(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"),
+    database: Optional[str] = None,
 ):
     """Return paginated audit summaries without exposing full SQL evidence."""
     limit = max(1, min(limit, 100))
@@ -359,22 +360,24 @@ def list_audits(
                           evidence->>'collection_status' AS collection_status,
                           evidence->>'trigger' AS trigger,
                           evidence->>'statistics_target' AS statistics_target,
-                          COALESCE(
-                              evidence #>> '{cluster,database_identity,0,database}',
-                              evidence #>> '{cluster,database_info,0,database}'
-                          ) AS database,
+                          target.database,
                           jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
                           CASE WHEN jsonb_typeof(knowledge_refs) = 'array'
                                THEN jsonb_array_length(knowledge_refs)
                                ELSE 0 END AS reference_count
                    FROM audit_records
+                   CROSS JOIN LATERAL (VALUES (COALESCE(
+                       evidence #>> '{cluster,database_identity,0,database}',
+                       evidence #>> '{cluster,database_info,0,database}'
+                   ))) AS target(database)
                    WHERE (%s::text IS NULL OR audit_type=%s)
                      AND (%s::text IS NULL OR risk_level = ANY(%s))
                      AND (%s::text IS NULL OR evidence->>'statistics_target' = %s)
+                     AND (%s::text IS NULL OR target.database = %s)
                    ORDER BY created_at DESC, audit_id DESC LIMIT %s OFFSET %s""",
                 (audit_type, audit_type, risk,
                  ["critical"] if risk == "critical" else ["high", "critical"],
-                 table, table, limit, offset),
+                 table, table, database, database, limit, offset),
             )
             records = [dict(row) for row in cursor.fetchall()]
         return {"items": records, "limit": limit, "offset": offset}
