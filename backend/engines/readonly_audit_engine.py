@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from openai import APIStatusError
 from ..tools.knowledge_search_tool import execute_search_knowledge
 from ..tools.lock_audit_tool import execute_get_database_locks
 from ..ai.agent_client import AIOpsAgent
@@ -25,6 +26,8 @@ class ReadonlyAuditEngine:
             analysis = await AIOpsAgent().diagnose(issue, evidence)
         except Exception as error:
             analysis = AIOpsAgent._fallback_diagnosis(evidence, type(error).__name__)
+            if isinstance(error, APIStatusError):
+                analysis['ai_http_status'] = error.status_code
         if analysis.get('analysis_fallback') and not analysis.get('knowledge_refs') and any(
             finding.get('check') == 'prepared_transaction_blocker'
             for finding in evidence.get('findings', [])
