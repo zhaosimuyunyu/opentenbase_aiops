@@ -190,6 +190,7 @@ class ReadonlyHealthCollector:
         node_stats = []
         errors = {}
         data_nodes = [node for node in nodes if node.get("node_type") == "D"]
+        limit = self.config.AIOPS_DATA_NODE_TABLE_LIMIT
         for node in data_nodes:
             name = node.get("node_name")
             try:
@@ -200,7 +201,7 @@ class ReadonlyHealthCollector:
                         "last_analyze,last_autoanalyze "
                         "FROM pg_stat_user_tables "
                         "WHERE schemaname NOT IN ('pg_catalog','information_schema') "
-                        "ORDER BY schemaname, relname LIMIT 201"
+                        f"ORDER BY schemaname, relname LIMIT {limit + 1}"
                     )
                     if table:
                         schema, relation = table.split(".", 1)
@@ -221,12 +222,12 @@ class ReadonlyHealthCollector:
                     )
                     columns = [item[0] for item in cursor.description]
                     rows = cursor.fetchall()
-                    if len(rows) > 200:
+                    if len(rows) > limit:
                         errors[f"data_node_stats:{name}"] = {
                             "type": "CollectionLimit",
-                            "message": "Only the first 200 tables were collected",
+                            "message": f"Only the first {limit} tables were collected",
                         }
-                        rows = rows[:200]
+                        rows = rows[:limit]
                     if table and not rows:
                         raise ValueError("Target table statistics are unavailable on this node")
                     node_stats.extend(

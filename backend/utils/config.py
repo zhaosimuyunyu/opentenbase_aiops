@@ -41,6 +41,9 @@ class Config:
         60, int(os.getenv("AIOPS_AUTO_AUDIT_INTERVAL_SECONDS", "900"))
     )
     AIOPS_AUTO_AUDIT_TABLE = os.getenv("AIOPS_AUTO_AUDIT_TABLE", "").strip() or None
+    AIOPS_DATA_NODE_TABLE_LIMIT = int(os.getenv("AIOPS_DATA_NODE_TABLE_LIMIT", "200"))
+    if AIOPS_DATA_NODE_TABLE_LIMIT < 1:
+        raise ValueError("AIOPS_DATA_NODE_TABLE_LIMIT must be positive")
     AIOPS_AUTO_AUDIT_TARGETS = tuple(dict.fromkeys(
         part.strip() for part in AIOPS_AUTO_AUDIT_TABLE.split(",")
     )) if AIOPS_AUTO_AUDIT_TABLE else (None,)
