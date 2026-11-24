@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+同版本隔离 GTM、CN 和 DN 已通过 `pg_clean.so` 加载验收。临时 CN 和 DN 使用 `fn_shared_buffers=12800`、`shared_buffers=32MB`、`max_connections=20`、`max_wal_senders=2`、`max_prepared_transactions=32` 和 `pg_workfile_max_entries=1024`，共享内存申请降至约 771 MiB 和 637 MiB。DN 在 CN 启动前后均通过连接检查。随后在临时 DN 注册 CN 节点，解决了处理 `SET global_session` 时的节点找不到错误。从临时 CN 执行 `LOAD` 成功，三个临时进程均已停止。此验收尚未注册扩展函数或执行事务恢复。
+
 隔离拓扑复测时，临时 DN 曾在日志中报告已开始监听，随后 CN 连接被拒绝。Docker Linux 内核日志记录了 `otb-node1` 所属 cgroup 内两次全局 OOM，均杀死了 `postgres` 进程。容器未设置独立内存上限，检查时 Docker Linux 环境的 2 GiB swap 已接近耗尽。内核日志使用宿主 PID，尚未将两次事件逐一映射到临时 DN 的容器 PID。下次隔离恢复验收需为拓扑预留独立内存预算，并在启动 CN 前持续检查 DN 连通性。
 
 构建 `b612d77cb` 对应的 `pg_clean--1.0.sql` 明确将诊断、事务提交与回滚、记录清理等函数授予 `PUBLIC`。安装验收应检查普通角色的有效执行权限，并限制恢复入口的授权。已有后台清理器启用的实例还需单独验证注册扩展后是否会立即处理存量预备事务。当前仅核对了安装脚本，尚未实测扩展权限或安装时的后台行为。
