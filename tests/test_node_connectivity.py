@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.collectors.readonly_health import ReadonlyHealthCollector
+from backend.ai.agent_client import AIOpsAgent
 
 
 class NodeConnectivityTests(unittest.TestCase):
@@ -51,6 +52,53 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertEqual(tables[0]["live_tuples"], 1200)
         self.assertEqual(tables[0]["modifications_since_analyze"], 500)
         self.assertEqual([node["node_name"] for node in tables[0]["nodes"]], ["dn0001", "dn0002"])
+
+    def test_preserves_prepared_transaction_participants_by_data_node(self):
+        collector = ReadonlyHealthCollector()
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchall.side_effect = [
+            [{"transaction_id": "11576", "gid": "g-1", "owner": "dbuser"}],
+            [{"transaction_id": "11457", "gid": "g-1", "owner": "dbuser"}],
+        ]
+
+        transactions, errors = collector._collect_data_node_prepared_xacts(
+            connection,
+            [
+                {"node_name": "dn0001", "node_type": "D"},
+                {"node_name": "cn0001", "node_type": "C"},
+                {"node_name": "dn0002", "node_type": "D"},
+            ],
+        )
+
+        self.assertEqual(errors, {})
+        self.assertEqual([item["node_name"] for item in transactions], ["dn0001", "dn0002"])
+        self.assertEqual([item["transaction_id"] for item in transactions], ["11576", "11457"])
+
+    def test_fallback_diagnosis_names_each_prepared_transaction_participant(self):
+        context = {
+            "findings": [{
+                "check": "prepared_transaction_blocker",
+                "observed": "One prepared transaction blocks two waiters",
+                "evidence": [{
+                    "transaction_id": "21973",
+                    "gid": "g-1",
+                    "owner": "dbuser",
+                    "database": "postgres",
+                    "data_node_participants": [
+                        {"node_name": "dn0001", "transaction_id": "11576", "gid": "g-1"},
+                        {"node_name": "dn0002", "transaction_id": "11457", "gid": "g-1"},
+                    ],
+                }],
+            }],
+        }
+
+        result = AIOpsAgent._fallback_diagnosis(context, "timeout")
+
+        self.assertIn("dn0001", result["structured"]["evidence"][-2])
+        self.assertIn("11576", result["structured"]["evidence"][-2])
+        self.assertIn("dn0002", result["structured"]["evidence"][-1])
+        self.assertIn("11457", result["structured"]["evidence"][-1])
 
 
 if __name__ == "__main__":

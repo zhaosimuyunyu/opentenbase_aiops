@@ -124,6 +124,11 @@ class ReadonlyHealthCollector:
                 )
                 results["data_node_table_stats"] = node_stats
                 errors.update(node_stats_errors)
+                prepared, prepared_errors = self._collect_data_node_prepared_xacts(
+                    connection, nodes
+                )
+                results["data_node_prepared_transactions"] = prepared
+                errors.update(prepared_errors)
         except Exception as error:
             errors["connection"] = {
                 "type": type(error).__name__,
@@ -213,3 +218,34 @@ class ReadonlyHealthCollector:
                 "last_analyze": row.get("last_analyze"),
             })
         return list(by_table.values()), errors
+
+    def _collect_data_node_prepared_xacts(self, connection, nodes):
+        transactions = []
+        errors = {}
+        for node in nodes:
+            if node.get("node_type") != "D":
+                continue
+            name = node.get("node_name")
+            try:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '2500ms'")
+                    cursor.execute("SET LOCAL lock_timeout = '750ms'")
+                    remote_query = (
+                        "SELECT transaction::text AS transaction_id,gid,owner,database,prepared "
+                        "FROM pg_prepared_xacts ORDER BY prepared"
+                    )
+                    cursor.execute(
+                        sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
+                        (remote_query,),
+                    )
+                    transactions.extend(
+                        {"node_name": name, **dict(row)} for row in cursor.fetchall()
+                    )
+                connection.rollback()
+            except Exception as error:
+                connection.rollback()
+                errors[f"data_node_prepared_transactions:{name}"] = {
+                    "type": type(error).__name__,
+                    "message": str(error).strip(),
+                }
+        return transactions, errors

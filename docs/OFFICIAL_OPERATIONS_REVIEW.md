@@ -22,11 +22,13 @@
 
 本项目当前锁采集器直接读取 `pg_locks` 并连接 `pg_stat_activity`，它没有调用 `pg_unlock`。巡检 SQL 以只读事务执行并设置 statement/lock timeout，但只读巡检 API 仍属于本项目自建逻辑。
 
+2026-11-24 在当前 OpenTenBase_v5.0 实验实例查询 `pg_available_extensions` 时没有发现 `pg_unlock`，因此不能依赖该扩展处理当前锁问题。实测的长期 prepared transaction GID `_$XC$21973:cn0001:T:2:1` 同时出现在 DN1 和 DN2，两个 DN 的本地事务 ID 分别为 `11576` 和 `11457`，CN 等待的事务 ID 为 `21973`。AIOps 将这些 ID 按 GID 关联并持久化，不执行 `COMMIT PREPARED` 或 `ROLLBACK PREPARED`。
+
 ## 入库与来源核验
 
 `scripts/import_operations_docs.py` 已把此前遗漏的官方 `monitoring.sgml`、`pgxcmonitor.sgml`，以及 `pg_unlock` 扩展安装 SQL 加入待导入清单。清单还包含官方 `pg_unlock` 和 Prometheus 监控指南中英文版本。脚本按来源 URL、固定提交号和 SHA-256 内容摘要核对资料，并在写入后检查片段内容、向量维度及来源元数据。扩展 SQL 使用 `official_source` 分类，知识检索工具已允许 AI 显式搜索该分类。
 
-Docker Engine 恢复后，三份新增资料已写入 pgvector 并逐篇校验，共 281 个片段。知识库实测总计 67 份资料、3,501 个片段，12 项检索回归全部通过。OpenTenBase CN 的 11003 端口拒绝连接，巡检仅验证了采集失败分支，尚无扩展兼容性或性能实测结果。
+Docker Engine 恢复后，三份新增资料已写入 pgvector 并逐篇校验，共 281 个片段。知识库实测总计 67 份资料、3,501 个片段，12 项检索回归全部通过。当前 CN、DN1、DN2 和 GTM 网络端点均可达；表统计视图因 prepared transaction 锁超时无法读取，`pg_unlock` 未安装或不可用，尚无扩展兼容性或采集性能基准结果。
 
 代码仓库中的审计回归测试展示了审计配置语法和配置视图，但测试包含创建超级用户、删除数据库等破坏性步骤，不适合直接导入为生产操作指南。因此没有把测试脚本包装成官方操作手册，也没有将数据库行为审计误称为健康巡检 API。
 

@@ -119,6 +119,12 @@ class AIOpsAgent:
                     f"{item.get('gid')} owned by {item.get('owner')} in {item.get('database')}."
                     for item in transactions
                 ],
+                *[
+                    f"Participant on {participant.get('node_name')} has local transaction ID "
+                    f"{participant.get('transaction_id')} for GID {participant.get('gid')}."
+                    for item in transactions
+                    for participant in item.get('data_node_participants', [])
+                ],
             ])
             root_cause = (
                 'Observed waiting locks match a prepared transaction. This is direct evidence '

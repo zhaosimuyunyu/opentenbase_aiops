@@ -53,7 +53,8 @@ class ReadonlyAuditEngine:
         checks = snapshot['checks']
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info',
-                    'prepared_transactions', 'node_connectivity')}
+                    'prepared_transactions', 'data_node_prepared_transactions',
+                    'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
                     'table_stats', 'index_usage', 'data_node_table_stats')}
@@ -116,6 +117,13 @@ class ReadonlyAuditEngine:
             transaction for transaction in prepared
             if str(transaction.get('transaction_id')) in waiting_xids
         ]
+        prepared_by_gid = {}
+        for transaction in checks.get('data_node_prepared_transactions') or []:
+            prepared_by_gid.setdefault(transaction.get('gid'), []).append(transaction)
+        for transaction in matching_prepared:
+            transaction['data_node_participants'] = prepared_by_gid.get(
+                transaction.get('gid'), []
+            )
         if matching_prepared:
             findings.append({
                 'check': 'prepared_transaction_blocker', 'severity': 'high',
@@ -180,6 +188,11 @@ class ReadonlyAuditEngine:
             'table_stats', 'index_usage',
         }
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
+        cluster_node_errors = {
+            name for name in snapshot['errors']
+            if name.startswith('data_node_prepared_transactions:')
+        }
+        cluster_errors.update(cluster_node_errors)
         performance_errors = performance_checks.intersection(snapshot['errors'])
         performance_node_errors = {
             name for name in snapshot['errors'] if name.startswith('data_node_stats:')
