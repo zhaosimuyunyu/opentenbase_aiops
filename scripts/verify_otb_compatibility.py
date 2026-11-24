@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Probe the OpenTenBase SQL surface used by AIOps without changing data."""
+import argparse
 import json
+import re
 import socket
 import sys
 from pathlib import Path
@@ -10,6 +12,7 @@ from psycopg2.extras import RealDictCursor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.utils.config import Config
+from backend.collectors.readonly_health import ReadonlyHealthCollector
 
 
 PROBES = {
@@ -28,6 +31,11 @@ PROBES = {
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--table", help="Also verify targeted data-node statistics for schema.table")
+    args = parser.parse_args()
+    if args.table and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", args.table):
+        parser.error("--table must use schema.table format")
     config = Config()
     report = {
         "target": {"host": config.DB_HOST, "port": config.DB_PORT, "database": config.DB_NAME, "user": config.DB_USER},
@@ -80,7 +88,23 @@ def main() -> int:
                         report["node_connectivity"].append(result)
             except Exception as error:
                 connection.rollback()
-                report["probes"][name] = {"status": "fail", "type": type(error).__name__, "message": str(error).strip()}
+                report["probes"][name] = {"status": "fail", "type": type(error).__name__, "message": str(error).strip(),
+                                          "sqlstate": getattr(error, "pgcode", None)}
+
+        nodes = report["node_connectivity"]
+        data_nodes = [node for node in nodes if node["node_type"] == "D"]
+        collector = ReadonlyHealthCollector(config)
+        for label, table in (("data_node_statistics", None), ("targeted_data_node_statistics", args.table)):
+            if label == "targeted_data_node_statistics" and not table:
+                continue
+            tables, errors = collector._collect_data_node_stats(connection, data_nodes, table=table)
+            report["probes"][label] = {
+                "status": "pass" if data_nodes and not errors else "fail",
+                "table": table,
+                "data_node_count": len(data_nodes),
+                "table_count": len(tables),
+                "errors": errors,
+            }
     finally:
         connection.close()
 
