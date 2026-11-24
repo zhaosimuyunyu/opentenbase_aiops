@@ -196,7 +196,8 @@ class ReadonlyHealthCollector:
                 with connection.cursor() as cursor:
                     self._set_query_timeouts(cursor)
                     remote_query = (
-                        "SELECT schemaname,relname,relid,n_live_tup,n_dead_tup,n_mod_since_analyze,last_analyze "
+                        "SELECT schemaname,relname,relid,n_live_tup,n_dead_tup,n_mod_since_analyze,"
+                        "last_analyze,last_autoanalyze "
                         "FROM pg_stat_user_tables "
                         "WHERE schemaname NOT IN ('pg_catalog','information_schema') "
                         "ORDER BY schemaname, relname LIMIT 201"
@@ -209,7 +210,8 @@ class ReadonlyHealthCollector:
                             "pg_stat_get_live_tuples(oid) AS n_live_tup, "
                             "pg_stat_get_dead_tuples(oid) AS n_dead_tup, "
                             "pg_stat_get_mod_since_analyze(oid) AS n_mod_since_analyze, "
-                            "pg_stat_get_last_analyze_time(oid) AS last_analyze "
+                            "pg_stat_get_last_analyze_time(oid) AS last_analyze, "
+                            "pg_stat_get_last_autoanalyze_time(oid) AS last_autoanalyze "
                             "FROM pg_catalog.pg_class WHERE oid=pg_catalog.to_regclass({}) "
                             "AND relkind IN ('r', 'p')"
                         ).format(sql.Literal(schema), sql.Literal(qualified)).as_string(connection)
@@ -257,6 +259,7 @@ class ReadonlyHealthCollector:
                 "dead_tuples": row.get("n_dead_tup") or 0,
                 "modifications_since_analyze": row.get("n_mod_since_analyze") or 0,
                 "last_analyze": row.get("last_analyze"),
+                "last_autoanalyze": row.get("last_autoanalyze"),
             })
         return list(by_table.values()), errors
 
