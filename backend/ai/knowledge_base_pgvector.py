@@ -12,6 +12,7 @@ class PgVectorKnowledgeBase:
             dbname=os.getenv("KNOWLEDGE_DB_NAME", "aiops_knowledge"),
             user=os.getenv("KNOWLEDGE_DB_USER", "aiops_knowledge"),
             password=os.getenv("KNOWLEDGE_DB_PASSWORD", "aiops-local-dev-only"),
+            connect_timeout=5,
         )
         with self.conn, self.conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")

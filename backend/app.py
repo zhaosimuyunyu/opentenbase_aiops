@@ -230,8 +230,9 @@ async def run_readonly_health_audit(
 
 @app.get("/api/automation/status")
 def get_automation_status():
-    kb = PgVectorKnowledgeBase()
+    kb = None
     try:
+        kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('public.audit_records') AS audit_table")
             audit_table_exists = cursor.fetchone()["audit_table"] is not None
@@ -286,7 +287,8 @@ def get_automation_status():
         logger.exception("Failed to read automation status")
         raise HTTPException(status_code=503, detail="Automation status is unavailable") from error
     finally:
-        kb.close()
+        if kb is not None:
+            kb.close()
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
@@ -336,8 +338,9 @@ def list_audits(
     """Return paginated audit summaries without exposing full SQL evidence."""
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
-    kb = PgVectorKnowledgeBase()
+    kb = None
     try:
+        kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 """SELECT audit_id, audit_type, created_at, risk_level, status,
@@ -360,14 +363,16 @@ def list_audits(
         logger.exception("Failed to list audit history")
         raise HTTPException(status_code=503, detail="Audit history is unavailable") from error
     finally:
-        kb.close()
+        if kb is not None:
+            kb.close()
 
 
 @app.get("/api/audits/{audit_id}")
 async def get_audit(audit_id: str):
     """Return the stored evidence and diagnosis for one audit."""
-    kb = PgVectorKnowledgeBase()
+    kb = None
     try:
+        kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 """SELECT audit_id, audit_type, created_at, risk_level, status,
@@ -385,14 +390,16 @@ async def get_audit(audit_id: str):
         logger.exception("Failed to read audit")
         raise HTTPException(status_code=503, detail="Audit record is unavailable") from error
     finally:
-        kb.close()
+        if kb is not None:
+            kb.close()
 
 
 @app.post("/api/audits/{audit_id}/repair-requests")
 def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
     """Create an ANALYZE proposal from a persisted statistics finding."""
-    kb = PgVectorKnowledgeBase()
+    kb = None
     try:
+        kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT evidence, knowledge_refs FROM audit_records WHERE audit_id=%s", (audit_id,))
             record = cursor.fetchone()
@@ -422,7 +429,8 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
         logger.exception("Failed to create audit repair request")
         raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
     finally:
-        kb.close()
+        if kb is not None:
+            kb.close()
 
 
 @app.get("/api/repairs")
