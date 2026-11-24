@@ -15,6 +15,7 @@ from backend.utils.logger import setup_logger
 from backend.collectors.cluster import ClusterCollector
 from backend.collectors.performance import PerformanceCollector
 from backend.ai.llm_client import DeepSeekClient
+from backend.engines.repair_workflow import has_repair_identity
 
 logger = setup_logger(__name__)
 
@@ -108,7 +109,10 @@ with st.sidebar:
     st.caption("OpenTenBase AIOps v0.1.0")
 
 def render_repair_proposal(api_base, audit_id, findings):
-    eligible = [index for index, item in enumerate(findings) if item.get("check") == "stale_table_statistics"]
+    candidates = [index for index, item in enumerate(findings) if item.get("check") == "stale_table_statistics"]
+    eligible = [index for index in candidates if has_repair_identity(findings[index].get("evidence") or {})]
+    if len(eligible) < len(candidates):
+        st.warning("部分发现缺少数据库或表身份，请重新巡检后创建提案。")
     if eligible:
         selected_finding = st.selectbox(
             "生成统计维护提案",

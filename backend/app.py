@@ -17,7 +17,7 @@ from .ai.llm_client import DeepSeekClient
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .ai.knowledge_base_pgvector import PgVectorKnowledgeBase
 from psycopg2.extras import RealDictCursor
-from .engines.repair_workflow import RepairWorkflow
+from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
 
 logger = setup_logger(__name__)
@@ -379,6 +379,8 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
         if finding.get("check") != "stale_table_statistics":
             raise HTTPException(status_code=400, detail="Selected audit finding is not eligible for ANALYZE")
         evidence = finding["evidence"]
+        if not has_repair_identity(evidence):
+            raise HTTPException(status_code=400, detail="Audited database or table identity is missing; rerun the health audit")
         table = f"{evidence['schema']}.{evidence['table']}"
         return RepairWorkflow().create_request(
             "analyze_table", {"table": table},

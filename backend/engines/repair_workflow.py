@@ -20,6 +20,15 @@ def _table_name(value):
     return value
 
 
+def has_repair_identity(evidence):
+    identity = evidence.get("database_identity") or {}
+    nodes = evidence.get("nodes") or []
+    return bool(
+        identity.get("system_identifier") and identity.get("database")
+        and nodes and all(node.get("node_name") and node.get("relation_oid") for node in nodes)
+    )
+
+
 class RepairWorkflow:
     def __init__(self):
         self.config = Config()
