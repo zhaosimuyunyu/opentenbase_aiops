@@ -12,11 +12,12 @@ from psycopg2.extras import RealDictCursor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.utils.config import Config
-from backend.collectors.readonly_health import ReadonlyHealthCollector
+from backend.collectors.readonly_health import CHECKS, ReadonlyHealthCollector
 
 
 PROBES = {
     "connection_identity": "SELECT version(), current_database(), current_user",
+    "database_identity": CHECKS["database_identity"],
     "cluster_nodes": "SELECT node_name, node_type, node_host, node_port FROM pgxc_node ORDER BY node_type, node_name",
     "activity": "SELECT datname, state, count(*) AS connection_count FROM pg_stat_activity GROUP BY datname, state",
     "locks": """SELECT l.locktype, l.mode, l.granted, l.pid,
