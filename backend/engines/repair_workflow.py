@@ -20,10 +20,6 @@ def _table_name(value):
     return value
 
 
-def _identifier(value):
-    return sql.Identifier(*value.split("."))
-
-
 class RepairWorkflow:
     def __init__(self):
         self.config = Config()
@@ -39,13 +35,14 @@ class RepairWorkflow:
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS finding jsonb")
 
     @staticmethod
-    def _read_data_node_stats(connection, schema_name, table_name):
+    def _read_data_node_stats(connection, schema_name, table_name, *, keep_transaction=False):
         with connection.cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout = '2500ms'")
             cursor.execute("SET LOCAL lock_timeout = '750ms'")
             cursor.execute("SELECT node_name FROM pgxc_node WHERE node_type='D'")
             data_nodes = [row[0] for row in cursor.fetchall()]
-        connection.rollback()
+        if not keep_transaction:
+            connection.rollback()
         if not data_nodes:
             raise ValueError("No OpenTenBase data nodes are registered")
 
@@ -65,7 +62,8 @@ class RepairWorkflow:
                     (remote_query,),
                 )
                 stats = cursor.fetchone()
-            connection.rollback()
+            if not keep_transaction:
+                connection.rollback()
             if stats:
                 per_node.append({
                     "node_name": node_name,
@@ -170,7 +168,15 @@ class RepairWorkflow:
                         schema_name, table_name = (
                             table.split(".", 1) if "." in table else ("public", table)
                         )
-                    stats = self._read_data_node_stats(conn, schema_name, table_name)
+                        relation = sql.Identifier(schema_name, table_name)
+                        target.execute(
+                            sql.SQL("LOCK TABLE {} IN SHARE UPDATE EXCLUSIVE MODE").format(
+                                relation
+                            )
+                        )
+                    stats = self._read_data_node_stats(
+                        conn, schema_name, table_name, keep_transaction=True
+                    )
                     live_tuples = stats["live_tuples"]
                     modifications = stats["modifications_since_analyze"]
                     previous_by_node = {
@@ -191,7 +197,7 @@ class RepairWorkflow:
                             raise ValueError("The original ANALYZE finding is no longer present")
                         execution_attempted = True
                         target.execute(
-                            sql.SQL("ANALYZE {}").format(_identifier(table))
+                            sql.SQL("ANALYZE {}").format(relation)
                         )
                     conn.commit()
                     # The statistics collector can publish updates after ANALYZE commits.
