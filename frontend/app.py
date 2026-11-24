@@ -129,6 +129,23 @@ def render_collection_status(evidence):
             use_container_width=True,
             hide_index=True,
         )
+    fallback = (evidence.get("performance") or {}).get("data_node_stats_fallback") or {}
+    if fallback:
+        st.write("目标表补充统计")
+        st.dataframe(
+            [
+                {
+                    "目标表": target,
+                    "已采集节点": ", ".join(
+                        node["node_name"] for table in result["tables"] for node in table["nodes"]
+                    ),
+                    "采集错误": ", ".join(result["errors"]),
+                }
+                for target, result in fallback.items()
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
     if not evidence.get("statistics_target") and any(
         error.get("sqlstate") == "55P03" and (
             name in {"table_stats", "index_usage"} or name.startswith("data_node_stats:")
