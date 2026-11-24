@@ -171,6 +171,9 @@ class RepairWorkflow:
 
     def approve_and_execute(self, request_id, approver, token):
         approver = self._authorize_decision(token)
+        repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
+        if not repair_user or repair_user == self.config.DB_USER:
+            raise ValueError("Configure a dedicated AIOPS_REPAIR_DB_USER before executing repairs")
         kb = OperationsStore()
         try:
             self._ensure_schema(kb)
@@ -207,11 +210,10 @@ class RepairWorkflow:
                 # Persist the claim before issuing SQL on the separate OpenTenBase connection.
                 kb.conn.commit()
                 repair_config = copy(self.config)
-                if repair_config.AIOPS_REPAIR_DB_USER:
-                    repair_config.DB_USER = repair_config.AIOPS_REPAIR_DB_USER
-                    repair_config.DB_PASSWORD = repair_config.AIOPS_REPAIR_DB_PASSWORD
+                repair_config.DB_USER = repair_user
+                repair_config.DB_PASSWORD = repair_config.AIOPS_REPAIR_DB_PASSWORD
                 db = OpenTenBaseConnector(repair_config)
-                stats_db = OpenTenBaseConnector(self.config) if repair_config.AIOPS_REPAIR_DB_USER else db
+                stats_db = OpenTenBaseConnector(self.config)
                 execution_attempted = False
                 database_session_user = None
                 try:

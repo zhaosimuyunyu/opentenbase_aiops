@@ -130,7 +130,7 @@ opentenbase-aiops/
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
-| `AIOPS_REPAIR_DB_USER` | 审批通过后连接同一 CN 和数据库的执行账号 | 空，沿用 `DB_USER` |
+| `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的独立执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |
 | `AIOPS_REPAIR_DB_PASSWORD` | 独立执行账号的密码 | 空 |
 
 OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。配置独立执行账号后，由该账号获取表锁并执行 `ANALYZE`，巡检账号通过单独的只读连接完成执行前和执行后的逐 DN 统计检查。两条连接必须指向同一集群和数据库。

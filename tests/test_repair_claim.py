@@ -5,6 +5,19 @@ from backend.engines.repair_workflow import RepairWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_execution_requires_separate_role_before_claiming_request(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token",
+            DB_USER="auditor",
+        )
+        with patch("backend.engines.repair_workflow.OperationsStore") as store:
+            for repair_user in ("", "auditor"):
+                workflow.config.AIOPS_REPAIR_DB_USER = repair_user
+                with self.assertRaisesRegex(ValueError, "dedicated AIOPS_REPAIR_DB_USER"):
+                    workflow.approve_and_execute("request-1", "operator", "test-token")
+            store.assert_not_called()
+
     def test_individual_tokens_bind_identity_and_disable_shared_token(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(
@@ -31,6 +44,8 @@ class RepairClaimTests(unittest.TestCase):
     def test_interrupted_execution_cannot_be_claimed_again(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token", AIOPS_APPROVER_ID="configured-operator")
+        workflow.config.DB_USER = "auditor"
+        workflow.config.AIOPS_REPAIR_DB_USER = "repair_operator"
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value
         parameters = {"table": "public.orders"}
