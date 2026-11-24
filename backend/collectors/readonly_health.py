@@ -44,7 +44,7 @@ CHECKS = {
                     ELSE ARRAY[]::int[] END AS blocker_pids
         FROM pg_locks l
         LEFT JOIN pg_stat_activity a ON a.pid = l.pid
-        WHERE l.pid IS NOT NULL
+        WHERE l.pid IS NOT NULL OR l.granted
     """,
     "long_running_queries": """
         SELECT pid, usename, datname, state, query, query_start,

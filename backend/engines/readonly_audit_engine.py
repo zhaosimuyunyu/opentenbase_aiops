@@ -124,6 +124,12 @@ class ReadonlyAuditEngine:
             transaction['data_node_participants'] = prepared_by_gid.get(
                 transaction.get('gid'), []
             )
+            transaction['held_transaction_locks'] = [
+                lock for lock in lock_rows
+                if lock['granted'] and lock.get('pid') is None
+                and lock.get('locktype') == 'transactionid'
+                and lock.get('transactionid') == transaction.get('transaction_id')
+            ]
         if matching_prepared:
             findings.append({
                 'check': 'prepared_transaction_blocker', 'severity': 'high',
