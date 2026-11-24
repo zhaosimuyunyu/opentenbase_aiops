@@ -13,6 +13,10 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 3. 对失败探测记录 SQL 错误和数据库状态。
 4. 分别验收全库采集和目标表采集。目标表提案要求逐 DN 统计完整，执行后复查每个参与节点的 `last_analyze`。
 
+### 批量统计超时后的修复验收
+
+在真实 OpenTenBase 上用隔离复制表验收。全库巡检保持 `partial`，单表补充采集取得两个 DN 的统计，并生成 `statistics_source=fallback` 的统计过时发现。通过测试客户端调用实际提案和审批端点后，请求状态为 `executed`，两个 DN 的 `last_analyze` 均更新。重复审批返回 HTTP 400。验收使用模拟模型响应，测试表和审计记录已清理。
+
 兼容性通过只说明采集接口和字段可用，不代表已经验证了采集开销、跨 CN 锁图完整性或修复操作安全性。
 
 ## 2026-11-24 实测结果
