@@ -257,10 +257,12 @@ def get_automation_status():
                 latest = records[0] if records else None
                 latest_by_scope = {row["scope"]: dict(row) for row in records}
                 cursor.execute(
-                    """SELECT target.name AS "table", audit.created_at, audit.collection_status
+                    """SELECT target.name AS "table", audit.created_at, audit.collection_status,
+                              audit.analysis_fallback
                        FROM unnest(%s::text[]) WITH ORDINALITY AS target(name, position)
                        LEFT JOIN LATERAL (
-                           SELECT created_at, evidence->>'collection_status' AS collection_status
+                           SELECT created_at, evidence->>'collection_status' AS collection_status,
+                                  ai_analysis->'analysis_fallback' = 'true'::jsonb AS analysis_fallback
                            FROM audit_records
                            WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled'
                              AND COALESCE(evidence->>'statistics_target', '') = COALESCE(target.name, '')
@@ -328,6 +330,9 @@ def audit_metrics():
     metrics.append("# TYPE aiops_health_audit_scheduled_collection_degraded gauge")
     degraded = status["latest_scheduled_collection_status"] in {"partial", "error"}
     metrics.append(f"aiops_health_audit_scheduled_collection_degraded {int(degraded)}")
+    metrics.append("# TYPE aiops_health_audit_scheduled_analysis_degraded gauge")
+    analysis_degraded = any(row["analysis_fallback"] for row in status["scheduled_targets"])
+    metrics.append(f"aiops_health_audit_scheduled_analysis_degraded {int(analysis_degraded)}")
     return PlainTextResponse("\n".join(metrics) + "\n", media_type="text/plain; version=0.0.4")
 
 
