@@ -111,6 +111,12 @@ with st.sidebar:
 def render_analysis_status(analysis):
     if not isinstance(analysis, dict):
         return
+    retrieval_error = analysis.get("fallback_knowledge_error")
+    if retrieval_error:
+        details = retrieval_error["type"]
+        if retrieval_error.get("sqlstate"):
+            details += f" · SQLSTATE {retrieval_error['sqlstate']}"
+        st.warning(f"补充知识检索失败（{details}）")
     source = (analysis.get("structured") or {}).get("analysis_source")
     if source == "collection_failure":
         st.info("采集失败，未运行模型诊断")

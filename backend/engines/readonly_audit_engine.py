@@ -46,9 +46,13 @@ class ReadonlyAuditEngine:
                 )
                 analysis['knowledge_refs'] = result['results']
             except Exception as error:
+                sqlstate = getattr(error, 'pgcode', None)
+                analysis['fallback_knowledge_error'] = {
+                    'type': type(error).__name__, 'sqlstate': sqlstate,
+                }
                 logger.warning(
                     'Knowledge retrieval failed during prepared transaction audit (%s, SQLSTATE %s)',
-                    type(error).__name__, getattr(error, 'pgcode', None) or 'unavailable',
+                    type(error).__name__, sqlstate or 'unavailable',
                 )
         return analysis
 
