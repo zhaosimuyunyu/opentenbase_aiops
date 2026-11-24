@@ -24,7 +24,7 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(target=target):
                 store = MagicMock()
                 cursor = store.conn.cursor.return_value.__enter__.return_value
-                with patch(f"{module}.PgVectorKnowledgeBase", return_value=store), patch(
+                with patch(f"{module}.OperationsStore", return_value=store), patch(
                     f"{module}.ReadonlyHealthCollector"
                 ) as collector, patch.object(
                     ReadonlyAuditEngine, "_diagnose",

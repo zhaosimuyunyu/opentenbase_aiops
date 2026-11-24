@@ -2,7 +2,7 @@ import json
 import uuid
 from ..tools.lock_audit_tool import execute_get_database_locks
 from ..ai.agent_client import AIOpsAgent
-from ..ai.knowledge_base_pgvector import PgVectorKnowledgeBase
+from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
 from ..collectors.readonly_health import ReadonlyHealthCollector
 
@@ -43,7 +43,7 @@ class ReadonlyAuditEngine:
         elif locks['blocked_locks'] and risk_level in {'low', 'medium'}:
             risk_level = 'high'
         audit_id = str(uuid.uuid4())
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             with kb.conn, kb.conn.cursor() as cur:
                 cur.execute("""CREATE TABLE IF NOT EXISTS audit_records(
@@ -306,7 +306,7 @@ class ReadonlyAuditEngine:
                     if rank == deterministic_floor
                 )
         audit_id = str(uuid.uuid4())
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             with kb.conn, kb.conn.cursor() as cur:
                 cur.execute("""CREATE TABLE IF NOT EXISTS audit_records(

@@ -1,7 +1,7 @@
 import asyncio
 from starlette.concurrency import run_in_threadpool
 
-from ..ai.knowledge_base_pgvector import PgVectorKnowledgeBase
+from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
 from ..utils.logger import setup_logger
 from .readonly_audit_engine import ReadonlyAuditEngine
@@ -23,7 +23,7 @@ class HealthAuditScheduler:
             return await run_in_threadpool(self._run_with_database_lock, scheduled, table)
 
     def _run_with_database_lock(self, scheduled, table):
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         acquired = False
         try:
             with kb.conn.cursor() as cursor:

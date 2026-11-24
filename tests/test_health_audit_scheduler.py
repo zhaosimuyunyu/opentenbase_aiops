@@ -12,7 +12,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         cursor.fetchone.return_value = (False,)
 
         with patch(
-            "backend.engines.health_audit_scheduler.PgVectorKnowledgeBase",
+            "backend.engines.health_audit_scheduler.OperationsStore",
             return_value=knowledge_base,
         ), patch("backend.engines.health_audit_scheduler.ReadonlyAuditEngine") as engine:
             result = await HealthAuditScheduler().run_once()
@@ -30,7 +30,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         audit_result = {"audit_id": "audit-1"}
 
         with patch(
-            "backend.engines.health_audit_scheduler.PgVectorKnowledgeBase",
+            "backend.engines.health_audit_scheduler.OperationsStore",
             return_value=knowledge_base,
         ), patch("backend.engines.health_audit_scheduler.ReadonlyAuditEngine") as engine:
             engine.return_value.run_health_audit = AsyncMock(return_value=audit_result)
@@ -49,7 +49,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         cursor.fetchone.side_effect = [(True,), ("audit_records",), (True,)]
 
         with patch(
-            "backend.engines.health_audit_scheduler.PgVectorKnowledgeBase", return_value=store
+            "backend.engines.health_audit_scheduler.OperationsStore", return_value=store
         ), patch("backend.engines.health_audit_scheduler.ReadonlyAuditEngine") as engine:
             result = await HealthAuditScheduler().run_once(scheduled=True)
 
@@ -61,7 +61,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         scheduler = HealthAuditScheduler()
         await scheduler._run_lock.acquire()
         try:
-            with patch("backend.engines.health_audit_scheduler.PgVectorKnowledgeBase") as knowledge_base:
+            with patch("backend.engines.health_audit_scheduler.OperationsStore") as knowledge_base:
                 result = await scheduler.run_once()
             self.assertIsNone(result)
             knowledge_base.assert_not_called()

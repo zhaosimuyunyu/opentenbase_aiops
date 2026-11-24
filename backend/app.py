@@ -15,7 +15,7 @@ from .collectors.cluster import ClusterCollector
 from .collectors.performance import PerformanceCollector
 from .ai.llm_client import DeepSeekClient
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
-from .ai.knowledge_base_pgvector import PgVectorKnowledgeBase
+from .utils.operations_store import OperationsStore
 from psycopg2.extras import RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
@@ -232,7 +232,7 @@ async def run_readonly_health_audit(
 def get_automation_status():
     kb = None
     try:
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('public.audit_records') AS audit_table")
             audit_table_exists = cursor.fetchone()["audit_table"] is not None
@@ -340,7 +340,7 @@ def list_audits(
     offset = max(0, offset)
     kb = None
     try:
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
             if cursor.fetchone()["audit_table"] is None:
@@ -375,7 +375,7 @@ def get_audit(audit_id: str):
     """Return the stored evidence and diagnosis for one audit."""
     kb = None
     try:
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
             if cursor.fetchone()["audit_table"] is None:
@@ -405,7 +405,7 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
     """Create an ANALYZE proposal from a persisted statistics finding."""
     kb = None
     try:
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
             if cursor.fetchone()["audit_table"] is None:

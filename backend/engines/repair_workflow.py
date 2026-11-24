@@ -8,7 +8,7 @@ from psycopg2 import sql
 from psycopg2.extras import Json
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
-from ..ai.knowledge_base_pgvector import PgVectorKnowledgeBase
+from ..utils.operations_store import OperationsStore
 
 
 ALLOWED_OPERATIONS = {"analyze_table"}
@@ -100,7 +100,7 @@ class RepairWorkflow:
         params = dict(parameters or {})
         params["table"] = _table_name(params.get("table"))
         request_id = str(uuid.uuid4())
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             self._ensure_schema(kb)
             with kb.conn, kb.conn.cursor() as cur:
@@ -138,7 +138,7 @@ class RepairWorkflow:
     def approve_and_execute(self, request_id, approver, token):
         self._authorize_decision(token)
         approver = self.config.AIOPS_APPROVER_ID
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             self._ensure_schema(kb)
             with kb.conn, kb.conn.cursor() as cur:
@@ -287,7 +287,7 @@ class RepairWorkflow:
     def reject(self, request_id, approver, reason, token):
         self._authorize_decision(token)
         approver = self.config.AIOPS_APPROVER_ID
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             self._ensure_schema(kb)
             with kb.conn, kb.conn.cursor() as cur:
@@ -307,7 +307,7 @@ class RepairWorkflow:
         note = note.strip()
         if not 1 <= len(note) <= 4000:
             raise ValueError("Review note must contain 1 to 4000 characters")
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             self._ensure_schema(kb)
             with kb.conn, kb.conn.cursor() as cur:
@@ -328,7 +328,7 @@ class RepairWorkflow:
             kb.close()
 
     def list_requests(self, limit=50):
-        kb = PgVectorKnowledgeBase()
+        kb = OperationsStore()
         try:
             self._ensure_schema(kb)
             with kb.conn.cursor() as cur:

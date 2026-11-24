@@ -8,7 +8,7 @@ class RepairClaimTests(unittest.TestCase):
     def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(AIOPS_APPROVAL_TOKEN="test-token")
-        with patch("backend.engines.repair_workflow.PgVectorKnowledgeBase") as store:
+        with patch("backend.engines.repair_workflow.OperationsStore") as store:
             with self.assertRaises(PermissionError):
                 workflow.reject("request-1", "operator", "reason", "wrong-token")
             store.assert_not_called()
@@ -36,7 +36,7 @@ class RepairClaimTests(unittest.TestCase):
 
         module = "backend.engines.repair_workflow"
         with patch.object(workflow, "_ensure_schema"), patch(
-            f"{module}.PgVectorKnowledgeBase", return_value=store
+            f"{module}.OperationsStore", return_value=store
         ), patch(f"{module}.OpenTenBaseConnector", side_effect=lambda _: interrupt()) as connector:
             with self.assertRaises(KeyboardInterrupt):
                 workflow.approve_and_execute("request-1", "operator", "test-token")

@@ -1,19 +1,12 @@
 """Independent PostgreSQL/pgvector knowledge store."""
-import hashlib, os, uuid, re, math
+import hashlib, uuid, re, math
 from typing import Any
-import psycopg2
 from psycopg2.extras import Json
+from ..utils.operations_store import OperationsStore
 
-class PgVectorKnowledgeBase:
+class PgVectorKnowledgeBase(OperationsStore):
     def __init__(self):
-        self.conn = psycopg2.connect(
-            host=os.getenv("KNOWLEDGE_DB_HOST", "knowledge-db"),
-            port=int(os.getenv("KNOWLEDGE_DB_PORT", "5432")),
-            dbname=os.getenv("KNOWLEDGE_DB_NAME", "aiops_knowledge"),
-            user=os.getenv("KNOWLEDGE_DB_USER", "aiops_knowledge"),
-            password=os.getenv("KNOWLEDGE_DB_PASSWORD", "aiops-local-dev-only"),
-            connect_timeout=5,
-        )
+        super().__init__()
         try:
             with self.conn, self.conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -100,5 +93,3 @@ class PgVectorKnowledgeBase:
                     row.pop("metadata", None)
             cur.execute("INSERT INTO knowledge_retrieval_log VALUES(%s,%s,%s)", (str(uuid.uuid4()),query,Json(rows)))
             return rows
-
-    def close(self): self.conn.close()
