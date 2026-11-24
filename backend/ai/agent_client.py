@@ -4,6 +4,14 @@ from openai import OpenAI, APITimeoutError, APIConnectionError
 from ..utils.config import Config
 from ..tools.knowledge_search_tool import TOOL_SCHEMA, execute_search_knowledge
 
+
+def _model_evidence(value):
+    if isinstance(value, dict):
+        return {key: _model_evidence(item) for key, item in value.items() if key != "query"}
+    if isinstance(value, (list, tuple)):
+        return [_model_evidence(item) for item in value]
+    return value
+
 class AIOpsAgent:
     def __init__(self, config=None):
         c = config or Config()
@@ -11,7 +19,9 @@ class AIOpsAgent:
         self.model = c.DEEPSEEK_MODEL
 
     async def diagnose(self, issue_description, context):
-        prompt = issue_description + chr(10) + '当前证据:' + chr(10) + json.dumps(context, ensure_ascii=False, default=str)
+        prompt = issue_description + chr(10) + '当前证据:' + chr(10) + json.dumps(
+            _model_evidence(context), ensure_ascii=False, default=str
+        )
         system = ('你是 OpenTenBase 只读审计专家。必须基于给出的实时证据和知识检索结果回答。'
                   '区分已观察事实和推测。证据不能确认阻塞方或根因时，明确说尚未确认，并给出只读核查 SQL。'
                   '禁止编造 PID、锁类型、SQL、对象名、事务年龄或知识来源。禁止执行写操作。'
