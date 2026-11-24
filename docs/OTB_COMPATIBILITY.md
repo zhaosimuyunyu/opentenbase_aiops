@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+已逐节点只读核对该 GID 的 `pg_2pc` 文件。CN、DN1、DN2 的参与节点列表和 `global_prepare_timestamp` 一致。CN 文件另有 `global_commit_timestamp=308991314092`，两个 DN 文件均缺少该字段。这为核对 OpenTenBase 的两阶段提交恢复路径提供了持久化证据。事务仍待恢复。
+
 CN 历史日志将 GID `_$XC$21973:cn0001:T:2:1` 关联到 2026-11-22 的 `aiops_kb_probe` 测试建表。日志记录全局状态为 `TWO_PHASE_COMMITTING`，两个 DN 均处于 `TWO_PHASE_COMMIT_ERROR`，原始错误为 `can not commit transaction ... in xc_maintainence_mode`。当前 CN 会话通过 `to_regclass` 查不到该表，预备事务仍存在。上述证据确认了发起语句及当时的提交尝试，最终处置仍需核对协调器持久化决议和各参与节点的状态。
 
 API 容器能够通过 psycopg2 连接 OpenTenBase_v5.0 的 CN，读取节点注册信息、会话、锁、prepared transaction 和复制视图。完整健康巡检生成了审计记录并回读到 5 条知识引用。
