@@ -108,6 +108,36 @@ with st.sidebar:
     st.markdown("---")
     st.caption("OpenTenBase AIOps v0.1.0")
 
+def render_collection_status(evidence):
+    errors = evidence.get("collection_errors") or {}
+    status = evidence.get("collection_status")
+    if not errors and status not in {"partial", "error"}:
+        return
+    if status == "error":
+        st.error("巡检采集失败")
+    else:
+        st.warning("巡检只获得部分数据")
+    if errors:
+        st.dataframe(
+            [
+                {
+                    "检查项": name, "错误类型": error.get("type"),
+                    "SQLSTATE": error.get("sqlstate"), "详情": error.get("message"),
+                }
+                for name, error in errors.items()
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    if not evidence.get("statistics_target") and any(
+        error.get("sqlstate") == "55P03" and (
+            name in {"table_stats", "index_usage"} or name.startswith("data_node_stats:")
+        )
+        for name, error in errors.items()
+    ):
+        st.info("全库统计遇到锁等待。可在「只读巡检」中填写目标表，单独复查该表的 DN 统计。")
+
+
 def render_repair_proposal(api_base, audit_id, findings):
     candidates = [index for index, item in enumerate(findings) if item.get("check") == "stale_table_statistics"]
     eligible = [index for index in candidates if has_repair_identity(findings[index].get("evidence") or {})]
@@ -274,6 +304,7 @@ elif page == "🛡️ 只读巡检":
     audit = st.session_state.get("last_health_audit")
     if audit:
         st.metric("风险等级", audit["risk_level"])
+        render_collection_status(audit.get("evidence") or {})
         st.caption(f"审计 ID: {audit['audit_id']}")
         findings = audit.get("findings", [])
         if findings:
@@ -322,6 +353,7 @@ elif page == "📜 巡检历史":
                 response.raise_for_status()
                 detail = response.json()
                 evidence = detail.get("evidence") or {}
+                render_collection_status(evidence)
                 if not any(
                     name.startswith("data_node_stats:")
                     for name in evidence.get("collection_errors", {})
