@@ -2,10 +2,10 @@ groups:
   - name: opentenbase-aiops
     rules:
       - alert: OpenTenBaseAuditHighRisk
-        expr: aiops_health_audit_latest_risk{job="opentenbase-aiops",level=~"high|critical"} == 1
+        expr: aiops_health_audit_scope_risk{job="opentenbase-aiops",level=~"high|critical"} == 1
         for: 1m
         annotations:
-          summary: "Latest OpenTenBase health audit reports {{ $labels.level }} risk"
+          summary: "Latest OpenTenBase {{ $labels.scope }} audit reports {{ $labels.level }} risk"
       - alert: OpenTenBaseAuditOverdue
         expr: |
           (time() - aiops_health_audit_latest_scheduled_timestamp_seconds{job="opentenbase-aiops"}

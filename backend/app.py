@@ -236,14 +236,24 @@ def get_automation_status():
             cursor.execute("SELECT to_regclass('public.audit_records') AS audit_table")
             audit_table_exists = cursor.fetchone()["audit_table"] is not None
             latest = None
+            latest_by_scope = {}
             latest_scheduled_at = None
             latest_scheduled_collection_status = None
             if audit_table_exists:
                 cursor.execute(
-                    "SELECT audit_id,created_at,risk_level,evidence->>'trigger' AS trigger FROM audit_records "
-                    "WHERE audit_type='readonly_health_audit' ORDER BY created_at DESC LIMIT 1"
+                    """SELECT * FROM (
+                        SELECT DISTINCT ON (scope) audit_id, created_at, risk_level,
+                               evidence->>'trigger' AS trigger,
+                               evidence->>'statistics_target' AS statistics_target,
+                               CASE WHEN evidence->>'statistics_target' IS NULL
+                                    THEN 'full' ELSE 'targeted' END AS scope
+                        FROM audit_records WHERE audit_type='readonly_health_audit'
+                        ORDER BY scope, created_at DESC, audit_id DESC
+                    ) AS scoped ORDER BY created_at DESC, audit_id DESC"""
                 )
-                latest = cursor.fetchone()
+                records = cursor.fetchall()
+                latest = records[0] if records else None
+                latest_by_scope = {row["scope"]: dict(row) for row in records}
                 cursor.execute(
                     "SELECT created_at, evidence->>'collection_status' AS collection_status FROM audit_records "
                     "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled' "
@@ -260,6 +270,7 @@ def get_automation_status():
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
             "statistics_target": config.AIOPS_AUTO_AUDIT_TABLE,
             "latest_audit": dict(latest) if latest else None,
+            "latest_audits_by_scope": latest_by_scope,
             "latest_scheduled_at": latest_scheduled_at,
             "latest_scheduled_collection_status": latest_scheduled_collection_status,
         }
@@ -294,6 +305,13 @@ def audit_metrics():
         f'aiops_health_audit_latest_risk{{level="{level}"}} {int(risk == level)}'
         for level in levels
     )
+    metrics.append("# TYPE aiops_health_audit_scope_risk gauge")
+    for scope, record in status["latest_audits_by_scope"].items():
+        scope_risk = record["risk_level"] if record["risk_level"] in levels else "unknown"
+        metrics.extend(
+            f'aiops_health_audit_scope_risk{{scope="{scope}",level="{level}"}} {int(scope_risk == level)}'
+            for level in levels
+        )
     metrics.append("# TYPE aiops_health_audit_scheduled_collection_degraded gauge")
     degraded = status["latest_scheduled_collection_status"] in {"partial", "error"}
     metrics.append(f"aiops_health_audit_scheduled_collection_degraded {int(degraded)}")
@@ -317,6 +335,7 @@ def list_audits(
                 """SELECT audit_id, audit_type, created_at, risk_level, status,
                           evidence->>'collection_status' AS collection_status,
                           evidence->>'trigger' AS trigger,
+                          evidence->>'statistics_target' AS statistics_target,
                           jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
                           jsonb_array_length(COALESCE(knowledge_refs, '[]'::jsonb)) AS reference_count
                    FROM audit_records
