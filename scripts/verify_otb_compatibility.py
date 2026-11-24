@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import psycopg2
+from psycopg2 import sql as pg_sql
 from psycopg2.extras import RealDictCursor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -37,7 +38,11 @@ def main() -> int:
     parser.add_argument("--table", help="Also verify targeted data-node statistics for schema.table")
     parser.add_argument("--repair-account", action="store_true",
                         help="Probe with the configured repair login using read-only queries")
+    parser.add_argument("--repair-lock", action="store_true",
+                        help="Try the repair table lock and immediately roll back on a test table")
     args = parser.parse_args()
+    if args.repair_lock and not (args.repair_account and args.table):
+        parser.error("--repair-lock requires --repair-account and --table")
     if args.table and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", args.table):
         parser.error("--table must use schema.table format")
     config = Config()
@@ -120,6 +125,24 @@ def main() -> int:
                 "table_count": len(tables),
                 "errors": errors,
             }
+        if args.repair_lock:
+            connection.set_session(readonly=False)
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '1500ms'")
+                    cursor.execute(
+                        pg_sql.SQL("LOCK TABLE {} IN SHARE UPDATE EXCLUSIVE MODE NOWAIT").format(
+                            pg_sql.Identifier(*args.table.split(".", 1))
+                        )
+                    )
+                report["probes"]["repair_table_lock"] = {"status": "pass"}
+            except psycopg2.Error as error:
+                report["probes"]["repair_table_lock"] = {
+                    "status": "fail", "type": type(error).__name__,
+                    "message": str(error).strip(), "sqlstate": error.pgcode,
+                }
+            finally:
+                connection.rollback()
     finally:
         connection.close()
 
