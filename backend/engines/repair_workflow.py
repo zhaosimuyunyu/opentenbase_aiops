@@ -309,7 +309,14 @@ class RepairWorkflow:
                 except Exception as error:
                     if db._connection and not db._connection.closed:
                         db._connection.rollback()
-                    result = {"success": False, "operation": operation, "table": table, "error": str(error)}
+                    result = {
+                        "success": False,
+                        "operation": operation,
+                        "table": table,
+                        "error": str(error),
+                        "error_type": type(error).__name__,
+                        "sqlstate": getattr(error, "pgcode", None),
+                    }
                 finally:
                     db.close()
                 result["database_session_user"] = database_session_user
