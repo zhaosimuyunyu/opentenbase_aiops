@@ -102,6 +102,12 @@ class ReadonlyHealthCollector:
         self.statement_timeout_ms = statement_timeout_ms
         self.lock_timeout_ms = lock_timeout_ms
 
+    def _set_query_timeouts(self, cursor):
+        cursor.execute(
+            "SELECT set_config('statement_timeout', %s, true), set_config('lock_timeout', %s, true)",
+            (f"{self.statement_timeout_ms}ms", f"{self.lock_timeout_ms}ms"),
+        )
+
     def collect(self, *, table=None):
         connector = OpenTenBaseConnector(self.config)
         results = {}
@@ -112,14 +118,7 @@ class ReadonlyHealthCollector:
             for name, sql in CHECKS.items():
                 try:
                     with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                        cursor.execute(
-                            "SELECT set_config('statement_timeout', %s, true)",
-                            (f"{self.statement_timeout_ms}ms",),
-                        )
-                        cursor.execute(
-                            "SELECT set_config('lock_timeout', %s, true)",
-                            (f"{self.lock_timeout_ms}ms",),
-                        )
+                        self._set_query_timeouts(cursor)
                         cursor.execute(sql)
                         results[name] = [dict(row) for row in cursor.fetchall()]
                     connection.rollback()
@@ -195,8 +194,7 @@ class ReadonlyHealthCollector:
             name = node.get("node_name")
             try:
                 with connection.cursor() as cursor:
-                    cursor.execute("SET LOCAL statement_timeout = '2500ms'")
-                    cursor.execute("SET LOCAL lock_timeout = '750ms'")
+                    self._set_query_timeouts(cursor)
                     remote_query = (
                         "SELECT schemaname,relname,relid,n_live_tup,n_dead_tup,n_mod_since_analyze,last_analyze "
                         "FROM pg_stat_user_tables "
@@ -271,8 +269,7 @@ class ReadonlyHealthCollector:
             name = node.get("node_name")
             try:
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    cursor.execute("SET LOCAL statement_timeout = '2500ms'")
-                    cursor.execute("SET LOCAL lock_timeout = '750ms'")
+                    self._set_query_timeouts(cursor)
                     remote_query = (
                         "SELECT transaction::text AS transaction_id,gid,owner,database,prepared "
                         "FROM pg_prepared_xacts ORDER BY prepared"
