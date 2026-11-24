@@ -57,14 +57,13 @@ class RepairWorkflow:
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS manual_review jsonb")
 
     @staticmethod
-    def _read_data_node_stats(connection, schema_name, table_name, *, keep_transaction=False):
+    def _read_data_node_stats(connection, schema_name, table_name):
         with connection.cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout = '2500ms'")
             cursor.execute("SET LOCAL lock_timeout = '750ms'")
             cursor.execute("SELECT node_name FROM pgxc_node WHERE node_type='D'")
             data_nodes = [row[0] for row in cursor.fetchall()]
-        if not keep_transaction:
-            connection.rollback()
+        connection.rollback()
         if not data_nodes:
             raise ValueError("No OpenTenBase data nodes are registered")
 
@@ -84,8 +83,7 @@ class RepairWorkflow:
                     (remote_query,),
                 )
                 stats = cursor.fetchone()
-            if not keep_transaction:
-                connection.rollback()
+            connection.rollback()
             if stats:
                 per_node.append({
                     "node_name": node_name,
@@ -243,21 +241,18 @@ class RepairWorkflow:
                                 relation
                             )
                         )
-                    stats_conn = stats_db.connect() if stats_db is not db else conn
-                    if stats_db is not db:
-                        stats_conn.set_session(readonly=True, autocommit=False)
-                        with stats_conn.cursor() as reader:
-                            reader.execute("SET LOCAL statement_timeout = '2500ms'")
-                            reader.execute(
-                                "SELECT system_identifier::text, current_database() "
-                                "FROM pg_catalog.pg_control_system()"
-                            )
-                            if reader.fetchone() != identity[:2]:
-                                raise ValueError("Statistics connection does not match the repair database")
-                        stats_conn.rollback()
-                    stats = self._read_data_node_stats(
-                        stats_conn, schema_name, table_name, keep_transaction=stats_db is db
-                    )
+                    stats_conn = stats_db.connect()
+                    stats_conn.set_session(readonly=True, autocommit=False)
+                    with stats_conn.cursor() as reader:
+                        reader.execute("SET LOCAL statement_timeout = '2500ms'")
+                        reader.execute(
+                            "SELECT system_identifier::text, current_database() "
+                            "FROM pg_catalog.pg_control_system()"
+                        )
+                        if reader.fetchone() != identity[:2]:
+                            raise ValueError("Statistics connection does not match the repair database")
+                    stats_conn.rollback()
+                    stats = self._read_data_node_stats(stats_conn, schema_name, table_name)
                     live_tuples = stats["live_tuples"]
                     modifications = stats["modifications_since_analyze"]
                     previous_by_node = {
@@ -345,8 +340,7 @@ class RepairWorkflow:
                         except Error as rollback_error:
                             result["rollback_error_type"] = type(rollback_error).__name__
                 finally:
-                    if stats_db is not db:
-                        stats_db.close()
+                    stats_db.close()
                     db.close()
                 result["database_session_user"] = database_session_user
                 status = "executed" if result["success"] else (
