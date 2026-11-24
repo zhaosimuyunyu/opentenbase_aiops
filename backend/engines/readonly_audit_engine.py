@@ -128,13 +128,19 @@ class ReadonlyAuditEngine:
             str(row.get('transactionid')) for row in blocked_locks
             if row.get('transactionid') is not None
         }
-        matching_prepared = [
-            transaction for transaction in prepared
-            if str(transaction.get('transaction_id')) in waiting_xids
-        ]
         prepared_by_gid = {}
         for transaction in checks.get('data_node_prepared_transactions') or []:
             prepared_by_gid.setdefault(transaction.get('gid'), []).append(transaction)
+        blocked_gids = {
+            gid for gid, participants in prepared_by_gid.items()
+            if any(participant.get('waiting_pids') for participant in participants)
+        }
+        matching_prepared = [
+            dict(transaction) for transaction in prepared
+            if str(transaction.get('transaction_id')) in waiting_xids
+            or transaction.get('gid') in blocked_gids
+        ]
+        coordinator_gids = {transaction.get('gid') for transaction in matching_prepared}
         for transaction in matching_prepared:
             transaction['data_node_participants'] = prepared_by_gid.get(
                 transaction.get('gid'), []
@@ -145,6 +151,10 @@ class ReadonlyAuditEngine:
                 and lock.get('locktype') == 'transactionid'
                 and lock.get('transactionid') == transaction.get('transaction_id')
             ]
+        for gid in blocked_gids - coordinator_gids:
+            participants = prepared_by_gid[gid]
+            waiting = next(node for node in participants if node.get('waiting_pids'))
+            matching_prepared.append({**waiting, 'data_node_participants': participants})
         if matching_prepared:
             findings.append({
                 'check': 'prepared_transaction_blocker', 'severity': 'high',
