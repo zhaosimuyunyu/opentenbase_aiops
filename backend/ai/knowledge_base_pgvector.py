@@ -5,7 +5,7 @@ from psycopg2.extras import Json
 from ..utils.operations_store import OperationsStore
 
 class PgVectorKnowledgeBase(OperationsStore):
-    def __init__(self, *, statement_timeout_ms: int | None = None):
+    def __init__(self, *, statement_timeout_ms: int | None = None, initialize: bool = True):
         super().__init__()
         try:
             with self.conn, self.conn.cursor() as cur:
@@ -15,6 +15,8 @@ class PgVectorKnowledgeBase(OperationsStore):
                         "set_config('lock_timeout', '1000ms', false)",
                         (str(statement_timeout_ms),),
                     )
+                if not initialize:
+                    return
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_documents(
                     document_id text primary key, title text not null, content text not null,
