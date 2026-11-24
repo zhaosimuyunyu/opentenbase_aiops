@@ -14,19 +14,23 @@ class PgVectorKnowledgeBase:
             password=os.getenv("KNOWLEDGE_DB_PASSWORD", "aiops-local-dev-only"),
             connect_timeout=5,
         )
-        with self.conn, self.conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_documents(
-                document_id text primary key, title text not null, content text not null,
-                digest text unique not null, category text, source_url text, version text,
-                created_at timestamptz default now())""")
-            cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_chunks(
-                chunk_id text primary key, document_id text references knowledge_documents on delete cascade,
-                chunk_index int not null, content text not null, embedding vector(1024) not null,
-                metadata jsonb, unique(document_id, chunk_index))""")
-            cur.execute("CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_hnsw ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)")
-            cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_retrieval_log(
-                retrieval_id text primary key, query text not null, results jsonb, created_at timestamptz default now())""")
+        try:
+            with self.conn, self.conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_documents(
+                    document_id text primary key, title text not null, content text not null,
+                    digest text unique not null, category text, source_url text, version text,
+                    created_at timestamptz default now())""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_chunks(
+                    chunk_id text primary key, document_id text references knowledge_documents on delete cascade,
+                    chunk_index int not null, content text not null, embedding vector(1024) not null,
+                    metadata jsonb, unique(document_id, chunk_index))""")
+                cur.execute("CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_hnsw ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)")
+                cur.execute("""CREATE TABLE IF NOT EXISTS knowledge_retrieval_log(
+                    retrieval_id text primary key, query text not null, results jsonb, created_at timestamptz default now())""")
+        except Exception:
+            self.conn.close()
+            raise
 
     def add_document(self, title: str, content: str, embeddings: list[list[float]], category: str, source_url: str, version: str) -> str:
         digest = hashlib.sha256(content.encode()).hexdigest()
