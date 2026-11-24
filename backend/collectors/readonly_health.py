@@ -271,8 +271,11 @@ class ReadonlyHealthCollector:
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     self._set_query_timeouts(cursor)
                     remote_query = (
-                        "SELECT transaction::text AS transaction_id,gid,owner,database,prepared "
-                        "FROM pg_prepared_xacts ORDER BY prepared"
+                        "SELECT p.transaction::text AS transaction_id,p.gid,p.owner,p.database,p.prepared, "
+                        "ARRAY(SELECT DISTINCT l.pid FROM pg_locks l "
+                        "WHERE l.locktype='transactionid' AND l.transactionid=p.transaction "
+                        "AND NOT l.granted AND l.pid IS NOT NULL ORDER BY l.pid) AS waiting_pids "
+                        "FROM pg_prepared_xacts p ORDER BY p.prepared"
                     )
                     cursor.execute(
                         sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
