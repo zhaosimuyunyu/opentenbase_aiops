@@ -141,6 +141,19 @@ class ReadonlyHealthCollector:
                 )
                 results["data_node_table_stats"] = node_stats
                 errors.update(node_stats_errors)
+                if table is None and any(
+                    error.get("sqlstate") == "55P03" for error in node_stats_errors.values()
+                ):
+                    fallback_stats = {}
+                    for target in self.config.AIOPS_AUTO_AUDIT_TARGETS:
+                        if target is None:
+                            continue
+                        tables, target_errors = self._collect_data_node_stats(
+                            connection, nodes, table=target
+                        )
+                        fallback_stats[target] = {"tables": tables, "errors": target_errors}
+                    if fallback_stats:
+                        results["data_node_stats_fallback"] = fallback_stats
                 prepared, prepared_errors = self._collect_data_node_prepared_xacts(
                     connection, nodes
                 )

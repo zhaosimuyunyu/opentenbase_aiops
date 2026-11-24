@@ -76,7 +76,7 @@ class ReadonlyAuditEngine:
                     'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
-                    'table_stats', 'index_usage', 'data_node_table_stats')}
+                    'table_stats', 'index_usage', 'data_node_table_stats', 'data_node_stats_fallback')}
         findings = []
         lock_rows = checks.get('locks')
         blocked_locks = [row for row in lock_rows or [] if not row['granted']]
