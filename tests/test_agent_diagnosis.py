@@ -24,18 +24,25 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
         first = SimpleNamespace(content=None, tool_calls=[tool_call])
         final = SimpleNamespace(content='{"risk_level":"high"}')
         references = [{"source_url": "https://example.invalid/locks"}]
+        context = {"locks": [{"query": "fixture SQL", "message": "fixture detail", "sqlstate": "55P03"}]}
         with patch.object(
             agent.client.chat.completions, "create",
             new=Mock(side_effect=[
                 SimpleNamespace(choices=[SimpleNamespace(message=first)]),
                 SimpleNamespace(choices=[SimpleNamespace(message=final)]),
             ]),
-        ), patch(
+        ) as completion, patch(
             "backend.ai.agent_client.execute_search_knowledge",
             new=AsyncMock(return_value={"results": references}),
         ):
-            report = await agent.diagnose("Review locks", {})
+            report = await agent.diagnose("Review locks", context)
 
+        for invocation in completion.call_args_list:
+            prompt = invocation.kwargs["messages"][1]["content"]
+            self.assertNotIn("fixture SQL", prompt)
+            self.assertNotIn("fixture detail", prompt)
+            self.assertIn("55P03", prompt)
+        self.assertEqual(context["locks"][0]["query"], "fixture SQL")
         self.assertTrue(report["analysis_fallback"])
         self.assertTrue(report["tool_called"])
         self.assertEqual(report["ai_error"], "InvalidDiagnosticReport")
