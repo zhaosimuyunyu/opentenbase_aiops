@@ -133,6 +133,16 @@ class ReadonlyAuditEngine:
         table_stats = checks.get('table_stats') or []
         for table in table_stats:
             live = table.get('live_tuples') or 0
+            modifications = table.get('modifications_since_analyze') or 0
+            if modifications >= 1000 and modifications >= live * 0.2:
+                findings.append({
+                    'check': 'stale_table_statistics', 'severity': 'medium',
+                    'observed': f"{table['schemaname']}.{table['tablename']} has {modifications} modifications since analysis",
+                    'evidence': {
+                        'schema': table['schemaname'], 'table': table['tablename'],
+                        'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
+                    },
+                })
             dead = table.get('dead_tuples') or 0
             total = live + dead
             dead_ratio = dead / total if total else 0

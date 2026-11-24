@@ -63,6 +63,7 @@ CHECKS = {
     "table_stats": """
         SELECT schemaname, relname AS tablename, n_live_tup AS live_tuples,
                n_dead_tup AS dead_tuples, n_tup_ins AS inserts,
+               n_mod_since_analyze AS modifications_since_analyze,
                n_tup_upd AS updates, n_tup_del AS deletes,
                last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
         FROM pg_stat_user_tables

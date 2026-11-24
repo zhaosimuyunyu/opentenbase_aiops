@@ -2,7 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from .utils.config import Config
 from .utils.db_connector import OpenTenBaseConnector
@@ -50,13 +50,6 @@ class DiagnosisRequest(BaseModel):
     description: str
 
 
-class RepairRequestCreate(BaseModel):
-    operation: str
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    evidence: Dict[str, Any] = Field(default_factory=dict)
-    reason: str
-
-
 class RepairApprovalRequest(BaseModel):
     approver: str
     token: str
@@ -65,6 +58,11 @@ class RepairApprovalRequest(BaseModel):
 class RepairRejectionRequest(BaseModel):
     approver: str
     reason: str
+
+
+class RepairProposalRequest(BaseModel):
+    reason: str
+    finding_index: int = Field(ge=0)
 
 
 @app.get("/")
@@ -253,18 +251,36 @@ async def get_audit(audit_id: str):
         kb.close()
 
 
-@app.post("/api/repairs")
-async def create_repair_request(request: RepairRequestCreate):
-    """Create a pending, evidence-backed repair request."""
+@app.post("/api/audits/{audit_id}/repair-requests")
+def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
+    """Create an ANALYZE proposal from a persisted statistics finding."""
+    kb = PgVectorKnowledgeBase()
     try:
+        with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT evidence, knowledge_refs FROM audit_records WHERE audit_id=%s", (audit_id,))
+            record = cursor.fetchone()
+        if not record:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        findings = (record["evidence"] or {}).get("findings", [])
+        finding = findings[request.finding_index] if request.finding_index < len(findings) else {}
+        if finding.get("check") != "stale_table_statistics":
+            raise HTTPException(status_code=400, detail="Selected audit finding is not eligible for ANALYZE")
+        evidence = finding["evidence"]
+        table = f"{evidence['schema']}.{evidence['table']}"
         return RepairWorkflow().create_request(
-            request.operation, request.parameters, request.evidence, request.reason
+            "analyze_table", {"table": table},
+            {"observation": evidence, "knowledge_refs": record["knowledge_refs"] or []}, request.reason,
+            audit_id, finding
         )
+    except HTTPException:
+        raise
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
-        logger.exception("Failed to create repair request")
+        logger.exception("Failed to create audit repair request")
         raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
+    finally:
+        kb.close()
 
 
 @app.get("/api/repairs")
