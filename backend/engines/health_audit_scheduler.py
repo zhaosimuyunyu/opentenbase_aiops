@@ -24,11 +24,15 @@ class HealthAuditScheduler:
             return await run_in_threadpool(self._run_with_database_lock, scheduled, table)
 
     def _run_with_database_lock(self, scheduled, table):
+        target = Json(self.config.audit_target)
         kb = OperationsStore()
         acquired = False
         try:
             with kb.conn.cursor() as cursor:
-                cursor.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_ID,))
+                cursor.execute(
+                    "SELECT pg_try_advisory_lock(%s, hashtext((%s::jsonb)::text))",
+                    (ADVISORY_LOCK_ID, target),
+                )
                 acquired = cursor.fetchone()[0]
             kb.conn.commit()
             if not acquired:
@@ -46,7 +50,7 @@ class HealthAuditScheduler:
                                   AND COALESCE(evidence->>'statistics_target', '') = COALESCE(%s::text, '')
                                   AND created_at > now() - make_interval(secs => %s)
                             )""",
-                            (Json(self.config.audit_target), table, self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS),
+                            (target, table, self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS),
                         )
                         if cursor.fetchone()[0]:
                             return None
@@ -58,7 +62,10 @@ class HealthAuditScheduler:
             if acquired and not kb.conn.closed:
                 try:
                     with kb.conn.cursor() as cursor:
-                        cursor.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_ID,))
+                        cursor.execute(
+                            "SELECT pg_advisory_unlock(%s, hashtext((%s::jsonb)::text))",
+                            (ADVISORY_LOCK_ID, target),
+                        )
                     kb.conn.commit()
                 except Exception:
                     logger.exception("Failed to release health audit advisory lock")
