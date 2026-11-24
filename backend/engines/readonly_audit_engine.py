@@ -45,8 +45,11 @@ class ReadonlyAuditEngine:
                     top_k=3,
                 )
                 analysis['knowledge_refs'] = result['results']
-            except Exception:
-                logger.exception('Knowledge retrieval failed during prepared transaction audit')
+            except Exception as error:
+                logger.warning(
+                    'Knowledge retrieval failed during prepared transaction audit (%s, SQLSTATE %s)',
+                    type(error).__name__, getattr(error, 'pgcode', None) or 'unavailable',
+                )
         return analysis
 
     async def run_lock_audit(self):
