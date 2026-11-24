@@ -107,6 +107,30 @@ with st.sidebar:
     st.markdown("---")
     st.caption("OpenTenBase AIOps v0.1.0")
 
+def render_repair_proposal(api_base, audit_id, findings):
+    eligible = [index for index, item in enumerate(findings) if item.get("check") == "stale_table_statistics"]
+    if eligible:
+        selected_finding = st.selectbox(
+            "生成统计维护提案",
+            eligible,
+            format_func=lambda index: findings[index]["observed"],
+            key=f"repair-finding-{audit_id}",
+        )
+        repair_reason = st.text_input(
+            "提案说明", value="审计发现自上次分析以来有大量行变更，建议刷新优化器统计。",
+            key=f"repair-reason-{audit_id}",
+        )
+        if st.button("创建待审批 ANALYZE 提案", key=f"create-repair-{audit_id}"):
+            response = requests.post(
+                f"{api_base}/api/audits/{audit_id}/repair-requests",
+                json={"finding_index": selected_finding, "reason": repair_reason}, timeout=15,
+            )
+            if response.ok:
+                st.success(f"待审批请求已创建: {response.json()['request_id']}")
+            else:
+                st.error(response.text)
+
+
 # Main content
 if page == "📊 健康监控":
     st.markdown('<div class="main-header">📊 集群健康监控</div>', unsafe_allow_html=True)
@@ -246,28 +270,7 @@ elif page == "🛡️ 只读巡检":
         findings = audit.get("findings", [])
         if findings:
             st.dataframe(findings, use_container_width=True, hide_index=True)
-            eligible = [index for index, item in enumerate(findings) if item.get("check") == "stale_table_statistics"]
-            if eligible:
-                selected_finding = st.selectbox(
-                    "生成统计维护提案",
-                    eligible,
-                    format_func=lambda index: findings[index]["observed"],
-                    key=f"repair-finding-{audit['audit_id']}",
-                )
-                repair_reason = st.text_input(
-                    "提案说明", value="审计发现自上次分析以来有大量行变更，建议刷新优化器统计。",
-                    key=f"repair-reason-{audit['audit_id']}",
-                )
-                if st.button("创建待审批 ANALYZE 提案", key=f"create-repair-{audit['audit_id']}"):
-                    api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
-                    response = requests.post(
-                        f"{api_base}/api/audits/{audit['audit_id']}/repair-requests",
-                        json={"finding_index": selected_finding, "reason": repair_reason}, timeout=15,
-                    )
-                    if response.ok:
-                        st.success(f"待审批请求已创建: {response.json()['request_id']}")
-                    else:
-                        st.error(response.text)
+            render_repair_proposal(api_base, audit["audit_id"], findings)
         else:
             st.success("未发现规则告警")
         structured = audit.get("structured") or {}
@@ -310,6 +313,12 @@ elif page == "📜 巡检历史":
                 response = requests.get(f"{api_base}/api/audits/{selected_id}", timeout=10)
                 response.raise_for_status()
                 detail = response.json()
+                evidence = detail.get("evidence") or {}
+                if not any(
+                    name.startswith("data_node_stats:")
+                    for name in evidence.get("collection_errors", {})
+                ):
+                    render_repair_proposal(api_base, selected_id, evidence.get("findings", []))
                 st.json(detail.get("ai_analysis", {}))
                 with st.expander("查看现场证据"):
                     st.json(detail.get("evidence", {}))
