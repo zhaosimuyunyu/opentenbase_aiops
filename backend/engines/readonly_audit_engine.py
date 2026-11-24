@@ -7,12 +7,16 @@ from ..utils.config import Config
 from ..collectors.readonly_health import ReadonlyHealthCollector
 
 class ReadonlyAuditEngine:
-    def __init__(self):
-        self.agent = AIOpsAgent()
+    @staticmethod
+    async def _diagnose(issue, evidence):
+        try:
+            return await AIOpsAgent().diagnose(issue, evidence)
+        except Exception as error:
+            return AIOpsAgent._fallback_diagnosis(evidence, type(error).__name__)
 
     async def run_lock_audit(self):
         locks = await execute_get_database_locks(True)
-        analysis = await self.agent.diagnose(
+        analysis = await self._diagnose(
             f"发现 {locks['blocked_locks']} 个阻塞锁，请分析原因并给出只读建议", locks
         )
         structured = analysis.get('structured') or {}
@@ -251,7 +255,7 @@ class ReadonlyAuditEngine:
             }
             risk_level = 'unknown'
         else:
-            analysis = await self.agent.diagnose(issue, evidence)
+            analysis = await self._diagnose(issue, evidence)
             structured = analysis.get('structured') or {}
             risk_level = structured.get('risk_level')
             if isinstance(risk_level, str):

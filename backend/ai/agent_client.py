@@ -151,7 +151,7 @@ class AIOpsAgent:
                 'Resolve the prepared transaction only through an approved DBA change. COMMIT PREPARED and ROLLBACK PREPARED change database state.',
             ])
         else:
-            root_cause = 'AI service timed out. The collected audit evidence is available, but automated root-cause analysis was not completed.'
+            root_cause = 'AI analysis failed. The collected audit evidence remains available for review.'
             risk_level = 'unknown'
             recommendations.append(
                 'Preserve this audit evidence and retry AI analysis when the configured model endpoint is responsive.'
