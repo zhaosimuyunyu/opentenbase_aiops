@@ -78,6 +78,7 @@ class RepairApprovalRequest(BaseModel):
 class RepairRejectionRequest(BaseModel):
     approver: str
     reason: str
+    token: str = ""
 
 
 class RepairProposalRequest(BaseModel):
@@ -353,7 +354,7 @@ async def list_repair_requests(limit: int = 50):
 
 
 @app.post("/api/repairs/{request_id}/approve")
-async def approve_repair_request(request_id: str, request: RepairApprovalRequest):
+def approve_repair_request(request_id: str, request: RepairApprovalRequest):
     try:
         return RepairWorkflow().approve_and_execute(
             request_id, request.approver, request.token
@@ -368,9 +369,11 @@ async def approve_repair_request(request_id: str, request: RepairApprovalRequest
 
 
 @app.post("/api/repairs/{request_id}/reject")
-async def reject_repair_request(request_id: str, request: RepairRejectionRequest):
+def reject_repair_request(request_id: str, request: RepairRejectionRequest):
     try:
-        return RepairWorkflow().reject(request_id, request.approver, request.reason)
+        return RepairWorkflow().reject(request_id, request.approver, request.reason, request.token)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:

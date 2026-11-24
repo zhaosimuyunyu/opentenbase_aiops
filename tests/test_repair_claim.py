@@ -5,9 +5,17 @@ from backend.engines.repair_workflow import RepairWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
-    def test_interrupted_execution_cannot_be_claimed_again(self):
+    def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(AIOPS_APPROVAL_TOKEN="test-token")
+        with patch("backend.engines.repair_workflow.PgVectorKnowledgeBase") as store:
+            with self.assertRaises(PermissionError):
+                workflow.reject("request-1", "operator", "reason", "wrong-token")
+            store.assert_not_called()
+
+    def test_interrupted_execution_cannot_be_claimed_again(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(AIOPS_APPROVAL_TOKEN="test-token", AIOPS_APPROVER_ID="configured-operator")
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value
         parameters = {"table": "public.orders"}
@@ -23,6 +31,7 @@ class RepairClaimTests(unittest.TestCase):
         def interrupt():
             store.conn.commit.assert_called_once()
             self.assertIn("status='executing'", cursor.execute.call_args.args[0])
+            self.assertEqual(cursor.execute.call_args.args[1][0], "configured-operator")
             raise KeyboardInterrupt
 
         module = "backend.engines.repair_workflow"

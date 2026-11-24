@@ -329,7 +329,7 @@ elif page == "🧾 修复审批":
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 st.json({"parameters": item.get("parameters"), "evidence": item.get("evidence"), "reason": item.get("reason")})
                 if item["status"] == "pending":
-                    approver = st.text_input("审批人", value=st.session_state.config.AIOPS_APPROVER_ID, key=f"a-{item['request_id']}")
+                    approver = st.session_state.config.AIOPS_APPROVER_ID
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)
                     if left.button("批准并执行", key=f"approve-{item['request_id']}"):
@@ -337,7 +337,7 @@ elif page == "🧾 修复审批":
                         st.json(response.json())
                     reject_reason = right.text_input("拒绝原因", key=f"r-{item['request_id']}")
                     if right.button("拒绝", key=f"reject-{item['request_id']}"):
-                        response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/reject", json={"approver": approver, "reason": reject_reason}, timeout=10)
+                        response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/reject", json={"approver": approver, "reason": reject_reason, "token": token}, timeout=10)
                         st.json(response.json())
     except Exception as error:
         st.error(f"读取修复审批失败: {error}")

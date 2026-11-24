@@ -101,11 +101,15 @@ class RepairWorkflow:
             kb.close()
         return {"request_id": request_id, "status": "pending", "operation": operation, "parameters": params}
 
-    def approve_and_execute(self, request_id, approver, token):
+    def _authorize_decision(self, token):
         if not self.config.AIOPS_APPROVAL_TOKEN or not hmac.compare_digest(
-            token or "", self.config.AIOPS_APPROVAL_TOKEN
+            (token or "").encode(), self.config.AIOPS_APPROVAL_TOKEN.encode()
         ):
             raise PermissionError("Approval token is not configured or is invalid")
+
+    def approve_and_execute(self, request_id, approver, token):
+        self._authorize_decision(token)
+        approver = self.config.AIOPS_APPROVER_ID
         kb = PgVectorKnowledgeBase()
         try:
             self._ensure_schema(kb)
@@ -216,7 +220,9 @@ class RepairWorkflow:
         finally:
             kb.close()
 
-    def reject(self, request_id, approver, reason):
+    def reject(self, request_id, approver, reason, token):
+        self._authorize_decision(token)
+        approver = self.config.AIOPS_APPROVER_ID
         kb = PgVectorKnowledgeBase()
         try:
             self._ensure_schema(kb)
