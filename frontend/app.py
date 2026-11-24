@@ -221,12 +221,12 @@ if page == "📊 健康监控":
 
         with col2:
             conn_info = data.get('connections', {})
-            conn_total = conn_info.get('total', 0)
-            conn_max = conn_info.get('max_connections', 0)
+            conn_total = conn_info.get('total')
+            conn_max = conn_info.get('max_connections')
+            usage = conn_info.get('usage_percent')
             st.metric(
-                "活跃连接",
-                f"{conn_total}/{conn_max}",
-                f"{conn_info.get('usage_percent', 0):.1f}%"
+                "当前 CN 客户端连接",
+                f"{conn_total}/{conn_max} ({usage:.1f}%)" if usage is not None else "未知",
             )
 
         with col3:

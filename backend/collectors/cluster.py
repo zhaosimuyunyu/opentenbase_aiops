@@ -2,7 +2,7 @@
 from typing import Dict, Any, List
 from .base import BaseCollector
 from ..utils.logger import setup_logger
-from .readonly_health import ReadonlyHealthCollector
+from .readonly_health import CHECKS, ReadonlyHealthCollector
 
 logger = setup_logger(__name__)
 
@@ -61,30 +61,19 @@ class ClusterCollector(BaseCollector):
 
     def get_connections(self) -> Dict[str, Any]:
         """Get connection statistics"""
-        sql = """
-        SELECT
-            datname,
-            state,
-            COUNT(*) as connection_count
-        FROM pg_stat_activity
-        GROUP BY datname, state
-        ORDER BY datname, state;
-        """
         try:
-            connections = self.db.execute_query(sql)
-
-            # Get max connections
-            max_conn_sql = "SHOW max_connections;"
-            max_conn = self.db.execute_query(max_conn_sql, fetch_one=True)
+            connections = self.db.execute_query(CHECKS['connections'])
+            max_conn = self.db.execute_query(CHECKS['max_connections'], fetch_one=True)
 
             total = sum(c['connection_count'] for c in connections) if connections else 0
-            max_connections = int(max_conn['max_connections']) if max_conn else 0
+            max_connections = max_conn['max_connections'] if max_conn else None
 
             return {
                 'by_database': connections or [],
                 'total': total,
                 'max_connections': max_connections,
-                'usage_percent': round(total / max_connections * 100, 2) if max_connections > 0 else 0
+                'scope': 'connected_cn',
+                'usage_percent': round(total / max_connections * 100, 2) if max_connections else None,
             }
         except Exception as e:
             self._record_error('connections', e)
