@@ -206,6 +206,7 @@ class RepairWorkflow:
                     repair_config.DB_PASSWORD = repair_config.AIOPS_REPAIR_DB_PASSWORD
                 db = OpenTenBaseConnector(repair_config)
                 execution_attempted = False
+                database_session_user = None
                 try:
                     conn = db.connect()
                     conn.set_session(readonly=False, autocommit=False)
@@ -213,12 +214,14 @@ class RepairWorkflow:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
                         target.execute(
-                            "SELECT system_identifier::text, current_database() "
+                            "SELECT system_identifier::text, current_database(), session_user "
                             "FROM pg_catalog.pg_control_system()"
                         )
                         identity = target.fetchone()
+                        if identity is not None:
+                            database_session_user = identity[2]
                         audited_identity = expected.get("database_identity") or {}
-                        if identity is None or identity != (
+                        if identity is None or identity[:2] != (
                             audited_identity.get("system_identifier"), audited_identity.get("database")
                         ):
                             raise ValueError("Audited database identity changed or is missing; rerun the health audit")
@@ -309,6 +312,7 @@ class RepairWorkflow:
                     result = {"success": False, "operation": operation, "table": table, "error": str(error)}
                 finally:
                     db.close()
+                result["database_session_user"] = database_session_user
                 status = "executed" if result["success"] else (
                     "unverified" if execution_attempted else "failed"
                 )
