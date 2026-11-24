@@ -286,7 +286,13 @@ elif page == "📜 巡检历史":
     st.markdown('<div class="main-header">📜 巡检历史</div>', unsafe_allow_html=True)
     api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
     try:
-        history = requests.get(f"{api_base}/api/audits", params={"limit": 50}, timeout=10).json()
+        risks = {"全部": None, "高与严重": "high_or_critical", "仅严重": "critical"}
+        risk = risks[st.selectbox("风险等级筛选", list(risks))]
+        response = requests.get(
+            f"{api_base}/api/audits", params={"limit": 50, "risk": risk}, timeout=10
+        )
+        response.raise_for_status()
+        history = response.json()
         items = history.get("items", [])
         if items:
             st.dataframe(items, use_container_width=True, hide_index=True)
@@ -299,12 +305,16 @@ elif page == "📜 巡检历史":
                 ),
             )
             if selected_id:
-                detail = requests.get(f"{api_base}/api/audits/{selected_id}", timeout=10).json()
+                response = requests.get(f"{api_base}/api/audits/{selected_id}", timeout=10)
+                response.raise_for_status()
+                detail = response.json()
                 st.json(detail.get("ai_analysis", {}))
                 with st.expander("查看现场证据"):
                     st.json(detail.get("evidence", {}))
+                with st.expander("查看知识引用"):
+                    st.json(detail.get("knowledge_refs") or [])
         else:
-            st.info("暂无巡检记录")
+            st.info("暂无符合筛选条件的巡检记录")
     except Exception as error:
         st.error(f"读取巡检历史失败: {error}")
 

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 
 from .utils.config import Config
 from .utils.db_connector import OpenTenBaseConnector
@@ -251,7 +251,12 @@ async def get_automation_status():
 
 
 @app.get("/api/audits")
-async def list_audits(limit: int = 20, offset: int = 0, audit_type: Optional[str] = None):
+def list_audits(
+    limit: int = 20,
+    offset: int = 0,
+    audit_type: Optional[str] = None,
+    risk: Optional[Literal["high_or_critical", "critical"]] = None,
+):
     """Return paginated audit summaries without exposing full SQL evidence."""
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
@@ -265,9 +270,12 @@ async def list_audits(limit: int = 20, offset: int = 0, audit_type: Optional[str
                           jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
                           jsonb_array_length(COALESCE(knowledge_refs, '[]'::jsonb)) AS reference_count
                    FROM audit_records
-                   WHERE (%s IS NULL OR audit_type=%s)
-                   ORDER BY created_at DESC LIMIT %s OFFSET %s""",
-                (audit_type, audit_type, limit, offset),
+                   WHERE (%s::text IS NULL OR audit_type=%s)
+                     AND (%s::text IS NULL OR risk_level = ANY(%s))
+                   ORDER BY created_at DESC, audit_id DESC LIMIT %s OFFSET %s""",
+                (audit_type, audit_type, risk,
+                 ["critical"] if risk == "critical" else ["high", "critical"],
+                 limit, offset),
             )
             records = [dict(row) for row in cursor.fetchall()]
         return {"items": records, "limit": limit, "offset": offset}
