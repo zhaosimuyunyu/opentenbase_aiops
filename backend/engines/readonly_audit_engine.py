@@ -211,10 +211,10 @@ class ReadonlyAuditEngine:
             node.get('status') == 'unreachable'
             for node in checks.get('node_connectivity', [])
         )
-        cluster_status = 'error' if len(cluster_errors) == len(cluster_checks) else (
+        cluster_status = 'error' if not cluster_checks.intersection(checks) else (
             'partial' if cluster_errors or unreachable_nodes else 'success'
         )
-        performance_status = 'error' if len(performance_errors) == len(performance_checks) else (
+        performance_status = 'error' if not performance_checks.intersection(checks) else (
             'partial' if performance_errors else 'success'
         )
         evidence = {

@@ -93,10 +93,9 @@ class OpenTenBaseConnector:
     def test_connection(self) -> Dict[str, Any]:
         """Test database connection and return status"""
         try:
-            result = self.execute_query(
-                "SELECT version(), current_database(), current_user",
-                fetch_one=True
-            )
+            with self.get_cursor() as cursor:
+                cursor.execute("SELECT version(), current_database(), current_user")
+                result = cursor.fetchone()
             return {
                 'status': 'success',
                 'connected': True,
