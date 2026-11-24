@@ -65,17 +65,16 @@ class HealthAuditScheduler:
     async def run_forever(self):
         while True:
             delay = self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS
-            try:
-                result = await self.run_once(
-                    scheduled=True, table=self.config.AIOPS_AUTO_AUDIT_TABLE
-                )
-                if result:
-                    logger.info("Scheduled health audit persisted as %s", result["audit_id"])
-                else:
-                    delay = min(delay, 30)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Scheduled health audit failed")
-                delay = min(delay, 60)
+            for table in self.config.AIOPS_AUTO_AUDIT_TARGETS:
+                try:
+                    result = await self.run_once(scheduled=True, table=table)
+                    if result:
+                        logger.info("Scheduled health audit persisted as %s", result["audit_id"])
+                    else:
+                        delay = min(delay, 30)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Scheduled health audit failed for %s", table)
+                    delay = min(delay, 60)
             await asyncio.sleep(delay)

@@ -41,10 +41,14 @@ class Config:
         60, int(os.getenv("AIOPS_AUTO_AUDIT_INTERVAL_SECONDS", "900"))
     )
     AIOPS_AUTO_AUDIT_TABLE = os.getenv("AIOPS_AUTO_AUDIT_TABLE", "").strip() or None
-    if AIOPS_AUTO_AUDIT_TABLE and not re.fullmatch(
-        r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", AIOPS_AUTO_AUDIT_TABLE
-    ):
-        raise ValueError("AIOPS_AUTO_AUDIT_TABLE must use schema.table format")
+    AIOPS_AUTO_AUDIT_TARGETS = tuple(dict.fromkeys(
+        part.strip() for part in AIOPS_AUTO_AUDIT_TABLE.split(",")
+    )) if AIOPS_AUTO_AUDIT_TABLE else (None,)
+    for target in AIOPS_AUTO_AUDIT_TARGETS:
+        if target is not None and not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", target
+        ):
+            raise ValueError("AIOPS_AUTO_AUDIT_TABLE must contain comma-separated schema.table names")
 
     # Vector Store
     CHROMA_PERSIST_DIRECTORY: str = os.getenv(

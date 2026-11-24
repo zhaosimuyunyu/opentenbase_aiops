@@ -239,6 +239,7 @@ def get_automation_status():
             latest_by_scope = {}
             latest_scheduled_at = None
             latest_scheduled_collection_status = None
+            scheduled_targets = []
             if audit_table_exists:
                 cursor.execute(
                     """SELECT * FROM (
@@ -254,17 +255,23 @@ def get_automation_status():
                 records = cursor.fetchall()
                 latest = records[0] if records else None
                 latest_by_scope = {row["scope"]: dict(row) for row in records}
-                cursor.execute(
-                    "SELECT created_at, evidence->>'collection_status' AS collection_status FROM audit_records "
-                    "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled' "
-                    "AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text "
-                    "ORDER BY created_at DESC, audit_id DESC LIMIT 1",
-                    (config.AIOPS_AUTO_AUDIT_TABLE,),
+                for table in config.AIOPS_AUTO_AUDIT_TARGETS:
+                    cursor.execute(
+                        "SELECT created_at, evidence->>'collection_status' AS collection_status FROM audit_records "
+                        "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled' "
+                        "AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text "
+                        "ORDER BY created_at DESC, audit_id DESC LIMIT 1",
+                        (table,),
+                    )
+                    scheduled_targets.append({
+                        "table": table, **(cursor.fetchone() or {"created_at": None, "collection_status": None})
+                    })
+                if scheduled_targets and all(row["created_at"] for row in scheduled_targets):
+                    latest_scheduled_at = min(row["created_at"] for row in scheduled_targets)
+                statuses = {row["collection_status"] for row in scheduled_targets}
+                latest_scheduled_collection_status = next(
+                    (value for value in ("error", "partial", "success") if value in statuses), None
                 )
-                scheduled_record = cursor.fetchone()
-                if scheduled_record:
-                    latest_scheduled_at = scheduled_record["created_at"]
-                    latest_scheduled_collection_status = scheduled_record["collection_status"]
         return {
             "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
@@ -273,6 +280,7 @@ def get_automation_status():
             "latest_audits_by_scope": latest_by_scope,
             "latest_scheduled_at": latest_scheduled_at,
             "latest_scheduled_collection_status": latest_scheduled_collection_status,
+            "scheduled_targets": scheduled_targets,
         }
     except Exception as error:
         logger.exception("Failed to read automation status")
