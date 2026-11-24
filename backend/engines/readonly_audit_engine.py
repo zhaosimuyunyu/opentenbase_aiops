@@ -172,29 +172,29 @@ class ReadonlyAuditEngine:
         identities = checks.get('database_identity') or []
         identity = identities[0] if identities else None
         table_stats = checks.get('data_node_table_stats') or []
-        for table in table_stats:
-            live = table.get('live_tuples') or 0
-            modifications = table.get('modifications_since_analyze') or 0
+        for table_stat in table_stats:
+            live = table_stat.get('live_tuples') or 0
+            modifications = table_stat.get('modifications_since_analyze') or 0
             if node_stats_complete and modifications >= 1000 and modifications >= live * 0.2:
                 findings.append({
                     'check': 'stale_table_statistics', 'severity': 'medium',
-                    'observed': f"{table['schemaname']}.{table['tablename']} has {modifications} modifications since analysis",
+                    'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} has {modifications} modifications since analysis",
                     'evidence': {
-                        'schema': table['schemaname'], 'table': table['tablename'],
+                        'schema': table_stat['schemaname'], 'table': table_stat['tablename'],
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
-                        'nodes': table.get('nodes', []),
+                        'nodes': table_stat.get('nodes', []),
                         'database_identity': identity,
                     },
                 })
-            dead = table.get('dead_tuples') or 0
+            dead = table_stat.get('dead_tuples') or 0
             total = live + dead
             dead_ratio = dead / total if total else 0
             if node_stats_complete and dead >= 1000 and dead_ratio >= 0.2:
                 findings.append({
                     'check': 'dead_tuple_ratio', 'severity': 'medium',
-                    'observed': f"{table['schemaname']}.{table['tablename']} estimated dead tuple ratio is {dead_ratio:.1%}",
+                    'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} estimated dead tuple ratio is {dead_ratio:.1%}",
                     'evidence': {
-                        'schema': table['schemaname'], 'table': table['tablename'],
+                        'schema': table_stat['schemaname'], 'table': table_stat['tablename'],
                         'live_tuples_estimate': live, 'dead_tuples_estimate': dead,
                         'dead_ratio_estimate': round(dead_ratio, 4),
                     },
