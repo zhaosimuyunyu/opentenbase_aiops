@@ -180,7 +180,7 @@ class ReadonlyHealthCollector:
                     cursor.execute("SET LOCAL statement_timeout = '2500ms'")
                     cursor.execute("SET LOCAL lock_timeout = '750ms'")
                     remote_query = (
-                        "SELECT schemaname,relname,n_live_tup,n_dead_tup,n_mod_since_analyze,last_analyze "
+                        "SELECT schemaname,relname,relid,n_live_tup,n_dead_tup,n_mod_since_analyze,last_analyze "
                         "FROM pg_stat_user_tables "
                         "WHERE schemaname NOT IN ('pg_catalog','information_schema') "
                         "ORDER BY schemaname, relname LIMIT 201"
@@ -189,7 +189,7 @@ class ReadonlyHealthCollector:
                         schema, relation = table.split(".", 1)
                         qualified = sql.Identifier(schema, relation).as_string(connection)
                         remote_query = sql.SQL(
-                            "SELECT {}::text AS schemaname, relname, "
+                            "SELECT {}::text AS schemaname, relname, oid AS relid, "
                             "pg_stat_get_live_tuples(oid) AS n_live_tup, "
                             "pg_stat_get_dead_tuples(oid) AS n_dead_tup, "
                             "pg_stat_get_mod_since_analyze(oid) AS n_mod_since_analyze, "
@@ -236,6 +236,7 @@ class ReadonlyHealthCollector:
             table["modifications_since_analyze"] += row.get("n_mod_since_analyze") or 0
             table["nodes"].append({
                 "node_name": row["node_name"],
+                "relation_oid": row.get("relid"),
                 "live_tuples": row.get("n_live_tup") or 0,
                 "dead_tuples": row.get("n_dead_tup") or 0,
                 "modifications_since_analyze": row.get("n_mod_since_analyze") or 0,

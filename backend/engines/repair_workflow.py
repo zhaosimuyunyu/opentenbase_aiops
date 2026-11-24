@@ -52,7 +52,7 @@ class RepairWorkflow:
         qualified_name = sql.Identifier(schema_name, table_name).as_string(connection)
         remote_query = sql.SQL(
             "SELECT pg_stat_get_live_tuples(oid), pg_stat_get_mod_since_analyze(oid), "
-            "pg_stat_get_last_analyze_time(oid) FROM pg_catalog.pg_class "
+            "pg_stat_get_last_analyze_time(oid), oid FROM pg_catalog.pg_class "
             "WHERE oid = pg_catalog.to_regclass({}) AND relkind IN ('r', 'p')"
         ).format(sql.Literal(qualified_name)).as_string(connection)
         per_node = []
@@ -72,6 +72,7 @@ class RepairWorkflow:
                     "live_tuples": stats[0] or 0,
                     "modifications_since_analyze": stats[1] or 0,
                     "last_analyze": stats[2],
+                    "relation_oid": stats[3],
                 })
         if not per_node:
             raise ValueError("Table statistics are unavailable on all OpenTenBase data nodes")
@@ -175,9 +176,14 @@ class RepairWorkflow:
                     previous_by_node = {
                         item["node_name"]: item["last_analyze"] for item in stats["nodes"]
                     }
-                    audited_nodes = {item["node_name"] for item in expected.get("nodes", [])}
-                    if not audited_nodes or audited_nodes != previous_by_node.keys():
-                        raise ValueError("Data-node coverage changed; rerun the health audit")
+                    audited_relations = {
+                        item["node_name"]: item.get("relation_oid") for item in expected.get("nodes", [])
+                    }
+                    current_relations = {
+                        item["node_name"]: item["relation_oid"] for item in stats["nodes"]
+                    }
+                    if not audited_relations or audited_relations != current_relations:
+                        raise ValueError("Audited table identity or data-node coverage changed; rerun the health audit")
                     with conn.cursor() as target:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
@@ -202,7 +208,8 @@ class RepairWorkflow:
                             and (previous is None or current_by_node[node_name] > previous)
                         ]
                         advanced = (
-                            current_by_node.keys() == previous_by_node.keys()
+                            {item["node_name"]: item["relation_oid"] for item in post_stats["nodes"]}
+                            == current_relations
                             and len(advanced_nodes) == len(previous_by_node)
                         )
                         if advanced:
