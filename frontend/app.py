@@ -336,6 +336,7 @@ elif page == "🛡️ 只读巡检":
         st.warning(f"读取周期巡检状态失败: {error}")
     statistics_target = st.text_input("目标表（可选）", placeholder="public.orders").strip()
     if st.button("运行只读巡检", type="primary"):
+        st.session_state.pop("last_health_audit", None)
         with st.spinner("正在采集 OpenTenBase 状态并分析..."):
             try:
                 params = {"table": statistics_target} if statistics_target else None
