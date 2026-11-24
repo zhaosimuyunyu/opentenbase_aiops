@@ -1,16 +1,37 @@
-"""Verify independent pgvector store with one fixed official-source document."""
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+"""Verify semantic retrieval from the indexed OpenTenBase source corpus."""
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from backend.ai.embedding_client import EmbeddingClient
 from backend.ai.knowledge_base_pgvector import PgVectorKnowledgeBase
 
-content = "OpenTenBase is a distributed database with GTM, CN and DN components. Diagnose lock waits with pg_locks and pg_stat_activity. A read-only audit must capture the waiting session, blocking session, node and query start time."
-embedding = EmbeddingClient()
-vectors = embedding.embed_batch([content])
-kb = PgVectorKnowledgeBase()
-doc = kb.add_document("OpenTenBase lock-wait audit", content, vectors, "official_doc", "https://github.com/OpenTenBase/OpenTenBase", "repository-head-verified-2026-11-22")
-query = "How do I audit a blocked session and find the blocking query?"
-hits = kb.search(embedding.embed_text(query), 3)
-assert hits and hits[0]["source_url"].startswith("https://github.com/OpenTenBase")
-print({"document_id": doc, "hits": len(hits), "top_similarity": round(float(hits[0]["similarity"]), 3), "source": hits[0]["source_url"]})
-kb.close()
+PINNED_SOURCE = re.compile(
+    r"https://raw\.githubusercontent\.com/OpenTenBase/(?:OpenTenBase|docs)/([0-9a-f]{40})/.+"
+)
+
+
+def main():
+    vector = EmbeddingClient().embed_text(
+        "How do I use pg_locks and pg_stat_activity to diagnose blocking queries?"
+    )
+    if not vector:
+        raise SystemExit("Embedding request failed")
+    kb = PgVectorKnowledgeBase()
+    try:
+        hits = kb.search(vector, top_k=5)[:5]
+    finally:
+        kb.close()
+    for hit in hits:
+        source = PINNED_SOURCE.fullmatch(hit.get("source_url") or "")
+        if source and source[1] == hit.get("version"):
+            print({"hits": len(hits), "similarity": round(float(hit["similarity"]), 3),
+                   "source": hit["source_url"]})
+            return
+    raise SystemExit("No commit-pinned OpenTenBase source found in the top five results")
+
+
+if __name__ == "__main__":
+    main()
