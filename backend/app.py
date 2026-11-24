@@ -359,6 +359,10 @@ def list_audits(
                           evidence->>'collection_status' AS collection_status,
                           evidence->>'trigger' AS trigger,
                           evidence->>'statistics_target' AS statistics_target,
+                          COALESCE(
+                              evidence #>> '{cluster,database_identity,0,database}',
+                              evidence #>> '{cluster,database_info,0,database}'
+                          ) AS database,
                           jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
                           CASE WHEN jsonb_typeof(knowledge_refs) = 'array'
                                THEN jsonb_array_length(knowledge_refs)

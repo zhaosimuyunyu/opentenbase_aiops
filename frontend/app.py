@@ -387,7 +387,8 @@ elif page == "📜 巡检历史":
                 "查看审计详情",
                 [item["audit_id"] for item in items],
                 format_func=lambda value: next(
-                    item["audit_type"] + " · " + item["created_at"] for item in items
+                    f"{item.get('database') or '未知数据库'} · {item['audit_type']} · {item['created_at']}"
+                    for item in items
                     if item["audit_id"] == value
                 ),
             )
