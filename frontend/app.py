@@ -356,14 +356,15 @@ elif page == "🛡️ 只读巡检":
     audit = st.session_state.get("last_health_audit")
     if audit:
         st.metric("风险等级", audit["risk_level"])
-        render_collection_status(audit.get("evidence") or {})
+        evidence = audit.get("evidence") or {}
+        render_collection_status(evidence)
         render_analysis_status(audit)
         st.caption(f"审计 ID: {audit['audit_id']}")
         findings = audit.get("findings", [])
         if findings:
             st.dataframe(findings, use_container_width=True, hide_index=True)
             render_repair_proposal(api_base, audit["audit_id"], findings)
-        else:
+        elif evidence.get("collection_status") == "success":
             st.success("未发现规则告警")
         structured = audit.get("structured") or {}
         if structured.get("root_cause"):
