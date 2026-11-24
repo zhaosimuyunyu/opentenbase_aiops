@@ -173,6 +173,18 @@ class AIOpsAgent:
                 'Ask the transaction owner or DBA to determine the intended outcome from the distributed transaction coordinator and application records.',
                 'Resolve the prepared transaction only through an approved DBA change. COMMIT PREPARED and ROLLBACK PREPARED change database state.',
             ])
+            diagnostic = ((context.get('cluster') or {}).get('pg_clean_diagnostics') or [{}])[0]
+            if diagnostic.get('registered') is False:
+                recommendations.append(
+                    'The CN does not register pg_clean_check_txn. Verify the availability of the '
+                    'matching pg_clean extension and use coordinator logs and participant records '
+                    'to confirm the transaction decision.'
+                )
+            elif diagnostic.get('registered') is True:
+                recommendations.append(
+                    'Have the DBA verify pg_clean prerequisites on all participants and use '
+                    'pg_clean_check_txn to collect cluster-wide transaction status.'
+                )
         else:
             root_cause = 'AI analysis failed. The collected audit evidence remains available for review.'
             risk_level = 'unknown'
