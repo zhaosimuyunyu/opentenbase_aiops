@@ -12,6 +12,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 后续在独立的 `lab` 测试表上以普通表所有者身份提交 `ANALYZE`。通过现有管理连接读取统计，确认 DN1 和 DN2 的 `last_analyze` 均更新。测试表和角色已删除。独立低权限连接读取双 DN 统计仍待验收。
 
+独立账号复测使用 `lab` 库中的临时普通登录角色作为隔离复制表的所有者。通过 FastAPI 测试客户端创建和审批提案，执行结果中的 `database_session_user` 与临时角色一致，巡检账号确认两个 DN 的 `last_analyze` 均更新，重复审批返回 HTTP 400。本次使用模拟模型响应和现有 CN 认证规则，测试表、角色和审计记录均已清理。
+
 ## 验收顺序
 
 1. 运行 python scripts/verify_otb_compatibility.py。
