@@ -5,7 +5,7 @@ from ..ai.knowledge_base_pgvector import PgVectorKnowledgeBase
 
 TOOL_SCHEMA={"type":"function","function":{"name":"search_knowledge","description":"Search OpenTenBase official documentation, source-code references, and troubleshooting guides. Prefer category official_doc unless the user specifically requests implementation details or local troubleshooting material.","parameters":{"type":"object","properties":{"query":{"type":"string"},"category":{"type":"string","enum":["official_doc","official_source","troubleshooting","performance","distributed"],"default":"official_doc"},"top_k":{"type":"integer","default":5}},"required":["query"]}}}
 async def execute_search_knowledge(query:str, category:Optional[str]="official_doc", top_k:int=5)->Dict[str,Any]:
-    started=time.time(); emb=EmbeddingClient(); kb=PgVectorKnowledgeBase()
+    started=time.time(); emb=EmbeddingClient(); kb=PgVectorKnowledgeBase(statement_timeout_ms=5000)
     try:
         vector = emb.embed_text(query)
         if vector is None:
