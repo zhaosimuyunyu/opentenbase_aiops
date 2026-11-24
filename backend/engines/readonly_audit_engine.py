@@ -6,6 +6,17 @@ from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
 from ..collectors.readonly_health import ReadonlyHealthCollector
 
+def _ensure_audit_schema(cursor):
+    cursor.execute("""CREATE TABLE IF NOT EXISTS audit_records(
+        audit_id text primary key, audit_type text not null,
+        created_at timestamptz default now(), evidence jsonb not null,
+        ai_analysis jsonb, knowledge_refs jsonb, risk_level text,
+        status text default 'pending')""")
+    cursor.execute("""CREATE INDEX IF NOT EXISTS audit_records_scheduled_target_idx
+        ON audit_records ((COALESCE(evidence->>'statistics_target', '')), created_at DESC, audit_id DESC)
+        WHERE audit_type = 'readonly_health_audit' AND evidence->>'trigger' = 'scheduled'""")
+
+
 class ReadonlyAuditEngine:
     @staticmethod
     async def _diagnose(issue, evidence):
@@ -46,11 +57,7 @@ class ReadonlyAuditEngine:
         kb = OperationsStore()
         try:
             with kb.conn, kb.conn.cursor() as cur:
-                cur.execute("""CREATE TABLE IF NOT EXISTS audit_records(
-                    audit_id text primary key, audit_type text not null,
-                    created_at timestamptz default now(), evidence jsonb not null,
-                    ai_analysis jsonb, knowledge_refs jsonb, risk_level text,
-                    status text default 'pending')""")
+                _ensure_audit_schema(cur)
                 cur.execute("""INSERT INTO audit_records(
                     audit_id,audit_type,evidence,ai_analysis,knowledge_refs,risk_level)
                     VALUES(%s,%s,%s,%s,%s,%s)""",
@@ -309,11 +316,7 @@ class ReadonlyAuditEngine:
         kb = OperationsStore()
         try:
             with kb.conn, kb.conn.cursor() as cur:
-                cur.execute("""CREATE TABLE IF NOT EXISTS audit_records(
-                    audit_id text primary key, audit_type text not null,
-                    created_at timestamptz default now(), evidence jsonb not null,
-                    ai_analysis jsonb, knowledge_refs jsonb, risk_level text,
-                    status text default 'pending')""")
+                _ensure_audit_schema(cur)
                 cur.execute("""INSERT INTO audit_records(
                     audit_id,audit_type,evidence,ai_analysis,knowledge_refs,risk_level)
                     VALUES(%s,%s,%s,%s,%s,%s)""",

@@ -41,7 +41,7 @@ class HealthAuditScheduler:
                                 SELECT 1 FROM audit_records
                                 WHERE audit_type = 'readonly_health_audit'
                                   AND evidence->>'trigger' = 'scheduled'
-                                  AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text
+                                  AND COALESCE(evidence->>'statistics_target', '') = COALESCE(%s::text, '')
                                   AND created_at > now() - make_interval(secs => %s)
                             )""",
                             (table, self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS),

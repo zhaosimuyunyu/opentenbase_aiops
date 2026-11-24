@@ -263,7 +263,7 @@ def get_automation_status():
                            SELECT created_at, evidence->>'collection_status' AS collection_status
                            FROM audit_records
                            WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled'
-                             AND (evidence->>'statistics_target') IS NOT DISTINCT FROM target.name
+                             AND COALESCE(evidence->>'statistics_target', '') = COALESCE(target.name, '')
                            ORDER BY created_at DESC, audit_id DESC LIMIT 1
                        ) AS audit ON true
                        ORDER BY target.position""",
