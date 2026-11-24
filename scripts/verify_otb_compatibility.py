@@ -137,9 +137,10 @@ def main() -> int:
                     cursor.execute("SET LOCAL statement_timeout = '1500ms'")
                     cursor.execute("SET LOCAL lock_timeout = '300ms'")
                     cursor.execute(CHECKS["pg_clean_diagnostics"])
-                    available = cursor.fetchone()[0]
+                    available, executable = cursor.fetchone()
                 report["pg_clean_diagnostics"] = {
                     "status": "registered" if available else "missing",
+                    "executable": executable,
                 }
             except psycopg2.Error as error:
                 report["pg_clean_diagnostics"] = {

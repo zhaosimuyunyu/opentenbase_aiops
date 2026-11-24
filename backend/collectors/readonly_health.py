@@ -19,8 +19,10 @@ def _collection_error(error):
 
 CHECKS = {
     "pg_clean_diagnostics": """
-        SELECT pg_catalog.to_regprocedure('public.pg_clean_check_txn(integer)')
-               IS NOT NULL AS registered
+        SELECT function_oid IS NOT NULL AS registered,
+               pg_catalog.has_function_privilege(function_oid, 'EXECUTE') AS executable
+        FROM (SELECT pg_catalog.to_regprocedure('public.pg_clean_check_txn(integer)')::oid
+                     AS function_oid) AS diagnostic
     """,
     "database_identity": """
         SELECT system_identifier::text AS system_identifier,

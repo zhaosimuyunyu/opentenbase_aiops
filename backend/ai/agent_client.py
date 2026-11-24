@@ -180,6 +180,11 @@ class AIOpsAgent:
                     'matching pg_clean extension and use coordinator logs and participant records '
                     'to confirm the transaction decision.'
                 )
+            elif diagnostic.get('executable') is False:
+                recommendations.append(
+                    'The CN registers pg_clean_check_txn, but the audit account lacks EXECUTE. '
+                    'Ask the DBA to collect the cluster-wide transaction status.'
+                )
             elif diagnostic.get('registered') is True:
                 recommendations.append(
                     'Have the DBA verify pg_clean prerequisites on all participants and use '
