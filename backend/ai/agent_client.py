@@ -39,6 +39,7 @@ class AIOpsAgent:
             return self._fallback_diagnosis(context, error)
         first = response.choices[0].message
         refs = []
+        tool_errors = []
         if first.tool_calls:
             assistant_message = {'role': 'assistant', 'content': first.content or ''}
             tool_calls = []
@@ -54,18 +55,23 @@ class AIOpsAgent:
             assistant_message['tool_calls'] = tool_calls
             messages.append(assistant_message)
             for call in first.tool_calls:
-                if call.function.name == 'search_knowledge':
+                try:
+                    if call.function.name != 'search_knowledge':
+                        raise ValueError('Unknown diagnostic tool')
                     result = await execute_search_knowledge(**json.loads(call.function.arguments))
-                    refs.extend(result.get('results', []))
-                    messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': json.dumps(result, ensure_ascii=False)})
+                except Exception as error:
+                    tool_errors.append(type(error).__name__)
+                    result = {'error': 'Knowledge retrieval unavailable', 'results': []}
+                refs.extend(result.get('results', []))
+                messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': json.dumps(result, ensure_ascii=False)})
             try:
                 final = self.client.chat.completions.create(model=self.model, messages=messages).choices[0].message
             except (APIConnectionError, APIStatusError) as error:
-                return self._fallback_diagnosis(context, error, refs, True)
+                return {**self._fallback_diagnosis(context, error, refs, True), 'tool_errors': tool_errors}
         else:
             final = first
         content = final.content or ''
-        if first.tool_calls and not refs:
+        if first.tool_calls and not refs and not tool_errors:
             try:
                 result = await execute_search_knowledge('pg_locks 未授予锁 事务等待 只读排查', top_k=5)
                 refs.extend(result.get('results', []))
@@ -85,16 +91,17 @@ class AIOpsAgent:
                 )
                 content = report.choices[0].message.content or ''
             except (APIConnectionError, APIStatusError) as error:
-                return self._fallback_diagnosis(
+                return {**self._fallback_diagnosis(
                     context, error, refs, bool(first.tool_calls)
-                )
+                ), 'tool_errors': tool_errors}
         structured = self._parse_report(content)
         if structured.get('parse_error'):
-            return self._fallback_diagnosis(
+            return {**self._fallback_diagnosis(
                 context, 'InvalidDiagnosticReport', refs, bool(first.tool_calls)
-            )
+            ), 'tool_errors': tool_errors}
         return {'analysis': content, 'structured': structured, 'knowledge_refs': refs,
-                'tool_called': bool(first.tool_calls), 'analysis_fallback': False}
+                'tool_called': bool(first.tool_calls), 'analysis_fallback': False,
+                'tool_errors': tool_errors}
 
     @staticmethod
     def _parse_report(content):
