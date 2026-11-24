@@ -418,8 +418,6 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
         if not record:
             raise HTTPException(status_code=404, detail="Audit not found")
         audit_evidence = record["evidence"] or {}
-        if any(name.startswith("data_node_stats:") for name in audit_evidence.get("collection_errors", {})):
-            raise HTTPException(status_code=400, detail="Data-node statistics are incomplete; rerun the health audit")
         findings = audit_evidence.get("findings", [])
         finding = findings[request.finding_index] if request.finding_index < len(findings) else {}
         if finding.get("check") != "stale_table_statistics":
@@ -428,6 +426,13 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
         if not has_repair_identity(evidence):
             raise HTTPException(status_code=400, detail="Audited database or table identity is missing; rerun the health audit")
         table = f"{evidence['schema']}.{evidence['table']}"
+        if any(name.startswith("data_node_stats:") for name in audit_evidence.get("collection_errors", {})):
+            fallback = (audit_evidence.get("performance") or {}).get("data_node_stats_fallback") or {}
+            entry = fallback.get(table) or {}
+            if evidence.get("statistics_source") != "fallback" or entry.get("errors") != {} or not any(
+                row.get("nodes") == evidence["nodes"] for row in entry.get("tables", [])
+            ):
+                raise HTTPException(status_code=400, detail="Data-node statistics are incomplete; rerun the health audit")
         return RepairWorkflow().create_request(
             "analyze_table", {"table": table},
             {"observation": evidence, "knowledge_refs": record["knowledge_refs"] or []}, request.reason,

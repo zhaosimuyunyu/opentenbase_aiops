@@ -371,11 +371,7 @@ elif page == "📜 巡检历史":
                 detail = response.json()
                 evidence = detail.get("evidence") or {}
                 render_collection_status(evidence)
-                if not any(
-                    name.startswith("data_node_stats:")
-                    for name in evidence.get("collection_errors", {})
-                ):
-                    render_repair_proposal(api_base, selected_id, evidence.get("findings", []))
+                render_repair_proposal(api_base, selected_id, evidence.get("findings", []))
                 st.json(detail.get("ai_analysis", {}))
                 with st.expander("查看现场证据"):
                     st.json(detail.get("evidence", {}))

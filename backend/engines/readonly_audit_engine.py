@@ -185,11 +185,17 @@ class ReadonlyAuditEngine:
         )
         identities = checks.get('database_identity') or []
         identity = identities[0] if identities else None
-        table_stats = checks.get('data_node_table_stats') or []
-        for table_stat in table_stats:
+        table_stats = [
+            (row, 'primary') for row in (checks.get('data_node_table_stats') or [])
+            if node_stats_complete
+        ]
+        for entry in (checks.get('data_node_stats_fallback') or {}).values():
+            if not entry['errors']:
+                table_stats.extend((row, 'fallback') for row in entry['tables'])
+        for table_stat, source in table_stats:
             live = table_stat.get('live_tuples') or 0
             modifications = table_stat.get('modifications_since_analyze') or 0
-            if node_stats_complete and modifications >= 1000 and modifications >= live * 0.2:
+            if modifications >= 1000 and modifications >= live * 0.2:
                 findings.append({
                     'check': 'stale_table_statistics', 'severity': 'medium',
                     'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} has {modifications} modifications since analysis",
@@ -198,12 +204,13 @@ class ReadonlyAuditEngine:
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
                         'nodes': table_stat.get('nodes', []),
                         'database_identity': identity,
+                        'statistics_source': source,
                     },
                 })
             dead = table_stat.get('dead_tuples') or 0
             total = live + dead
             dead_ratio = dead / total if total else 0
-            if node_stats_complete and dead >= 1000 and dead_ratio >= 0.2:
+            if dead >= 1000 and dead_ratio >= 0.2:
                 findings.append({
                     'check': 'dead_tuple_ratio', 'severity': 'medium',
                     'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} estimated dead tuple ratio is {dead_ratio:.1%}",
