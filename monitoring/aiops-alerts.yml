@@ -19,3 +19,10 @@ groups:
         for: 2m
         annotations:
           summary: "Prometheus cannot scrape OpenTenBase AIOps metrics"
+      - alert: OpenTenBaseAuditCollectionDegraded
+        expr: |
+          aiops_health_audit_scheduled_collection_degraded{job="opentenbase-aiops"} == 1
+          and aiops_health_audit_schedule_enabled{job="opentenbase-aiops"} == 1
+        for: 2m
+        annotations:
+          summary: "Latest scheduled OpenTenBase audit could not collect all checks"

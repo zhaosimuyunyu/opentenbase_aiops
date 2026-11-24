@@ -237,6 +237,7 @@ def get_automation_status():
             audit_table_exists = cursor.fetchone()["audit_table"] is not None
             latest = None
             latest_scheduled_at = None
+            latest_scheduled_collection_status = None
             if audit_table_exists:
                 cursor.execute(
                     "SELECT audit_id,created_at,risk_level,evidence->>'trigger' AS trigger FROM audit_records "
@@ -244,18 +245,23 @@ def get_automation_status():
                 )
                 latest = cursor.fetchone()
                 cursor.execute(
-                    "SELECT max(created_at) AS latest_scheduled_at FROM audit_records "
+                    "SELECT created_at, evidence->>'collection_status' AS collection_status FROM audit_records "
                     "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled' "
-                    "AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text",
+                    "AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text "
+                    "ORDER BY created_at DESC, audit_id DESC LIMIT 1",
                     (config.AIOPS_AUTO_AUDIT_TABLE,),
                 )
-                latest_scheduled_at = cursor.fetchone()["latest_scheduled_at"]
+                scheduled_record = cursor.fetchone()
+                if scheduled_record:
+                    latest_scheduled_at = scheduled_record["created_at"]
+                    latest_scheduled_collection_status = scheduled_record["collection_status"]
         return {
             "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
             "statistics_target": config.AIOPS_AUTO_AUDIT_TABLE,
             "latest_audit": dict(latest) if latest else None,
             "latest_scheduled_at": latest_scheduled_at,
+            "latest_scheduled_collection_status": latest_scheduled_collection_status,
         }
     except Exception as error:
         logger.exception("Failed to read automation status")
@@ -288,6 +294,9 @@ def audit_metrics():
         f'aiops_health_audit_latest_risk{{level="{level}"}} {int(risk == level)}'
         for level in levels
     )
+    metrics.append("# TYPE aiops_health_audit_scheduled_collection_degraded gauge")
+    degraded = status["latest_scheduled_collection_status"] in {"partial", "error"}
+    metrics.append(f"aiops_health_audit_scheduled_collection_degraded {int(degraded)}")
     return PlainTextResponse("\n".join(metrics) + "\n", media_type="text/plain; version=0.0.4")
 
 
