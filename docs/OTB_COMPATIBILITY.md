@@ -27,6 +27,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 从 API 容器将探测目标设为 `lab` 后，9 项 SQL 探测均通过，四个注册节点均可达，两个 DN 共返回 4 张表的统计。随后在独立测试进程中把每个 DN 的采集上限设为 1，两个 DN 均报告 `CollectionLimit`，全量巡检标记为 `partial`，同时 `public.memories` 的补采取得了双 DN 统计。该验收只读取数据库，部署默认目标仍是 `postgres`，其全量统计恢复仍待复验。
 
+通过 API 容器内的巡检引擎执行无目标表的完整巡检并回读审计库。审计 ID 为 `e66f700c-40ca-4436-87f9-799802575b83`，数据库确认为 `lab`，采集状态为 `success`，共记录 4 张表的 DN 统计。模型 HTTP 状态单独记录为 `403`。
+
 ### `postgres` 数据库故障与目标表验收
 
 API 容器能够通过 psycopg2 连接 OpenTenBase_v5.0 的 CN，读取节点注册信息、会话、锁、prepared transaction 和复制视图。完整健康巡检生成了审计记录并回读到 5 条知识引用。
