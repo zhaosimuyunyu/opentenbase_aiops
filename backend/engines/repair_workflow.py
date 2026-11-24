@@ -6,7 +6,7 @@ from copy import copy
 from time import sleep
 from datetime import datetime, timezone
 
-from psycopg2 import sql
+from psycopg2 import Error, sql
 from psycopg2.extras import Json
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
@@ -307,8 +307,6 @@ class RepairWorkflow:
                         "executed_at": datetime.now(timezone.utc).isoformat(),
                     }
                 except Exception as error:
-                    if db._connection and not db._connection.closed:
-                        db._connection.rollback()
                     result = {
                         "success": False,
                         "operation": operation,
@@ -317,6 +315,11 @@ class RepairWorkflow:
                         "error_type": type(error).__name__,
                         "sqlstate": getattr(error, "pgcode", None),
                     }
+                    if db._connection and not db._connection.closed:
+                        try:
+                            db._connection.rollback()
+                        except Error as rollback_error:
+                            result["rollback_error_type"] = type(rollback_error).__name__
                 finally:
                     db.close()
                 result["database_session_user"] = database_session_user
