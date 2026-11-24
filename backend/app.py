@@ -1,7 +1,7 @@
 """FastAPI application (optional REST API)"""
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
 from .utils.config import Config
@@ -13,6 +13,7 @@ from .ai.llm_client import DeepSeekClient
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .ai.knowledge_base_pgvector import PgVectorKnowledgeBase
 from psycopg2.extras import RealDictCursor
+from .engines.repair_workflow import RepairWorkflow
 
 logger = setup_logger(__name__)
 config = Config()
@@ -47,6 +48,23 @@ class QuestionRequest(BaseModel):
 
 class DiagnosisRequest(BaseModel):
     description: str
+
+
+class RepairRequestCreate(BaseModel):
+    operation: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+    reason: str
+
+
+class RepairApprovalRequest(BaseModel):
+    approver: str
+    token: str
+
+
+class RepairRejectionRequest(BaseModel):
+    approver: str
+    reason: str
 
 
 @app.get("/")
@@ -233,6 +251,55 @@ async def get_audit(audit_id: str):
         raise HTTPException(status_code=503, detail="Audit record is unavailable") from error
     finally:
         kb.close()
+
+
+@app.post("/api/repairs")
+async def create_repair_request(request: RepairRequestCreate):
+    """Create a pending, evidence-backed repair request."""
+    try:
+        return RepairWorkflow().create_request(
+            request.operation, request.parameters, request.evidence, request.reason
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to create repair request")
+        raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
+
+
+@app.get("/api/repairs")
+async def list_repair_requests(limit: int = 50):
+    try:
+        return {"items": RepairWorkflow().list_requests(limit)}
+    except Exception as error:
+        logger.exception("Failed to list repair requests")
+        raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
+
+
+@app.post("/api/repairs/{request_id}/approve")
+async def approve_repair_request(request_id: str, request: RepairApprovalRequest):
+    try:
+        return RepairWorkflow().approve_and_execute(
+            request_id, request.approver, request.token
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to execute repair request")
+        raise HTTPException(status_code=503, detail="Repair execution is unavailable") from error
+
+
+@app.post("/api/repairs/{request_id}/reject")
+async def reject_repair_request(request_id: str, request: RepairRejectionRequest):
+    try:
+        return RepairWorkflow().reject(request_id, request.approver, request.reason)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to reject repair request")
+        raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
 
 
 if __name__ == "__main__":

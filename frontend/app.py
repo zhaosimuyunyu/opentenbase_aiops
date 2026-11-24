@@ -77,7 +77,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "导航",
-        ["📊 健康监控", "🛡️ 只读巡检", "📜 巡检历史", "💬 智能问答", "🔍 性能诊断"],
+        ["📊 健康监控", "🛡️ 只读巡检", "📜 巡检历史", "🧾 修复审批", "💬 智能问答", "🔍 性能诊断"],
         label_visibility="collapsed"
     )
 
@@ -267,6 +267,30 @@ elif page == "📜 巡检历史":
             st.info("暂无巡检记录")
     except Exception as error:
         st.error(f"读取巡检历史失败: {error}")
+
+elif page == "🧾 修复审批":
+    st.markdown('<div class="main-header">🧾 修复审批</div>', unsafe_allow_html=True)
+    api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
+    try:
+        items = requests.get(f"{api_base}/api/repairs", params={"limit": 50}, timeout=10).json().get("items", [])
+        if not items:
+            st.info("暂无修复请求")
+        for item in items:
+            with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
+                st.json({"parameters": item.get("parameters"), "evidence": item.get("evidence"), "reason": item.get("reason")})
+                if item["status"] == "pending":
+                    approver = st.text_input("审批人", value=st.session_state.config.AIOPS_APPROVER_ID, key=f"a-{item['request_id']}")
+                    token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
+                    left, right = st.columns(2)
+                    if left.button("批准并执行", key=f"approve-{item['request_id']}"):
+                        response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/approve", json={"approver": approver, "token": token}, timeout=30)
+                        st.json(response.json())
+                    reject_reason = right.text_input("拒绝原因", key=f"r-{item['request_id']}")
+                    if right.button("拒绝", key=f"reject-{item['request_id']}"):
+                        response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/reject", json={"approver": approver, "reason": reject_reason}, timeout=10)
+                        st.json(response.json())
+    except Exception as error:
+        st.error(f"读取修复审批失败: {error}")
 
 elif page == "💬 智能问答":
     st.markdown('<div class="main-header">💬 智能问答助手</div>', unsafe_allow_html=True)
