@@ -8,6 +8,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 从 API 容器使用临时普通登录角色直接连接 `lab` 的两个 DN 时，两个端点均返回 `no pg_hba.conf entry`。临时角色已删除。若改用直接 DN 连接做最小权限验证，需要由部署方为指定来源、数据库和角色配置认证规则，然后逐节点验证登录和本地统计读取权限。
 
+在 `lab` 库的隔离复制表上，使用 `SET LOCAL ROLE` 切换到临时普通表所有者后，成功取得 `SHARE UPDATE EXCLUSIVE` 锁，`ANALYZE` 无警告返回。测试事务已回滚，临时角色和表随之清理。本次单独验证了 CN 上的表锁和命令权限，独立登录和执行后的双 DN 统计复核仍需验收。
+
 ## 验收顺序
 
 1. 运行 python scripts/verify_otb_compatibility.py。
