@@ -389,7 +389,14 @@ elif page == "🧾 修复审批":
     st.markdown('<div class="main-header">🧾 修复审批</div>', unsafe_allow_html=True)
     api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
     try:
-        response = requests.get(f"{api_base}/api/repairs", params={"limit": 50}, timeout=10)
+        queues = {"待审批": "pending", "待复核": "review", "全部记录": None}
+        queue = queues[st.selectbox("请求范围", list(queues))]
+        page_number = st.number_input("页码", min_value=1, step=1, key=f"repair-page-{queue}")
+        response = requests.get(
+            f"{api_base}/api/repairs",
+            params={"limit": 50, "offset": (page_number - 1) * 50, "queue": queue},
+            timeout=10,
+        )
         response.raise_for_status()
         decision = st.session_state.pop("repair_decision", None)
         if decision:

@@ -327,15 +327,18 @@ class RepairWorkflow:
         finally:
             kb.close()
 
-    def list_requests(self, limit=50):
+    def list_requests(self, limit=50, offset=0, queue=None):
         kb = OperationsStore()
         try:
             self._ensure_schema(kb)
             with kb.conn.cursor() as cur:
                 cur.execute(
                     "SELECT request_id,operation,parameters,evidence,reason,status,created_at,approved_at,approved_by,result,audit_id,finding,manual_review "
-                    "FROM repair_requests ORDER BY created_at DESC LIMIT %s",
-                    (max(1, min(limit, 100)),),
+                    """FROM repair_requests
+                    WHERE (%s::text IS NULL OR status = 'pending' AND %s = 'pending'
+                       OR status IN ('executing', 'unverified') AND manual_review IS NULL AND %s = 'review')
+                    ORDER BY created_at DESC, request_id DESC LIMIT %s OFFSET %s""",
+                    (queue, queue, queue, max(1, min(limit, 100)), max(0, offset)),
                 )
                 columns = [item[0] for item in cur.description]
                 return [dict(zip(columns, row)) for row in cur.fetchall()]

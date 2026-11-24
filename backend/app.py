@@ -453,9 +453,13 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
 
 
 @app.get("/api/repairs")
-async def list_repair_requests(limit: int = 50):
+def list_repair_requests(
+    limit: int = 50,
+    offset: int = 0,
+    queue: Optional[Literal["pending", "review"]] = None,
+):
     try:
-        return {"items": RepairWorkflow().list_requests(limit)}
+        return {"items": RepairWorkflow().list_requests(limit, offset, queue)}
     except Exception as error:
         logger.exception("Failed to list repair requests")
         raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
