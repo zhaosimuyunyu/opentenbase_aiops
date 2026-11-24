@@ -117,14 +117,19 @@ opentenbase-aiops/
 | `DB_HOST` | OpenTenBase 主机 | `otb-node1` |
 | `DB_PORT` | OpenTenBase 端口 | `11003` |
 | `DB_USER` | 数据库用户 | `opentenbase` |
+| `DB_NAME` | 连接的数据库 | `postgres` |
+| `DB_PASSWORD` | 数据库密码 | 空 |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key | **必填** |
 | `DEEPSEEK_API_BASE` | API 端点 | `https://api.deepseek.com/v1` |
 | `DEEPSEEK_MODEL` | 模型名称 | `deepseek-chat` |
+| `DEEPSEEK_TIMEOUT_SECONDS` | 单次巡检模型请求的超时秒数 | `45` |
+| `AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS` | 巡检页面等待 API 响应的超时秒数 | `210` |
 | `AIOPS_AUTO_AUDIT_ENABLED` | 是否启用周期健康巡检 | `false` |
 | `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` | 周期巡检间隔秒数，最小 60 秒 | `900` |
 | `AIOPS_AUTO_AUDIT_TABLE` | 周期巡检统计目标，支持逗号分隔，例如 `public.orders,public.items` | 空，使用全库采集 |
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
+| `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
 
 ### Prometheus 告警
 
@@ -140,7 +145,7 @@ opentenbase-aiops/
 将 AIOps API 的 `/metrics` 加入现有 Prometheus，抓取任务名设为 `opentenbase-aiops`。
 在同一 Docker 网络中使用 `aiops-api:8000`，在宿主机运行 Prometheus 时使用 `127.0.0.1:8000`。
 通过 Prometheus 的 `rule_files` 加载仓库中的 `monitoring/aiops-alerts.yml`，并用现有 Alertmanager 路由投递告警。
-规则覆盖最近一次巡检的高风险状态、启用定时巡检后的记录超期以及指标抓取失败。
+规则覆盖高风险、定时巡检超期、指标抓取失败、采集不完整和模型诊断回退。
 
 周期巡检默认关闭。配置启用后由 API 服务定期运行只读健康审计，结果写入巡检历史。多 API 实例通过知识库 PostgreSQL advisory lock 选出单一巡检者。手动巡检也经过 API 并使用同一把锁。
 
@@ -158,7 +163,16 @@ conn = psycopg2.connect(
 )
 ```
 
-**重要**: AIOps 容器需要加入 OpenTenBase 的 Docker 网络 (`otb-lab-net`)
+默认 Compose 配置需要预先存在的外部网络 `otb-lab-net`。使用不同部署拓扑时，确保 API 容器能访问配置的 CN 和 `pgxc_node` 公布的节点地址。
+
+使用当前仓库构建并启动 API 后，从项目目录运行只读兼容性探测。第二条命令适用于需要验收单表统计的环境，请将表名替换成实际存在的表。
+
+```powershell
+docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py
+docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --table public.orders
+```
+
+使用报告中的 `summary` 判断探测结果。节点可达且 CN 可连接时，统计查询仍可能失败。请查看具体失败项和错误原因。兼容性探测和全库巡检的验收范围见 [OpenTenBase 兼容性记录](docs/OTB_COMPATIBILITY.md)。
 
 ## 📚 使用指南
 
