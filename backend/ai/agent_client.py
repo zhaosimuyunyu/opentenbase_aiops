@@ -27,7 +27,19 @@ class AIOpsAgent:
         first = response.choices[0].message
         refs = []
         if first.tool_calls:
-            messages.append(first.model_dump())
+            assistant_message = {'role': 'assistant', 'content': first.content or ''}
+            tool_calls = []
+            for call in first.tool_calls:
+                tool_calls.append({
+                    'id': call.id,
+                    'type': 'function',
+                    'function': {
+                        'name': call.function.name,
+                        'arguments': call.function.arguments,
+                    },
+                })
+            assistant_message['tool_calls'] = tool_calls
+            messages.append(assistant_message)
             for call in first.tool_calls:
                 if call.function.name == 'search_knowledge':
                     result = await execute_search_knowledge(**json.loads(call.function.arguments))

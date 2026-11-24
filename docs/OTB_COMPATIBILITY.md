@@ -14,3 +14,9 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 4. 只有兼容性基线通过后，才启用审计建议和人工采纳执行流程。
 
 兼容性通过只说明采集接口和字段可用，不代表已经验证了采集开销、跨 CN 锁图完整性或修复操作安全性。
+
+## 当前实测结果
+
+2026-11-24 在 OpenTenBase_v5.0 实验集群执行了 8 项探测。7 项通过，1 项失败。失败项是表统计查询，返回 \`LockNotAvailable\`，原因是现有 prepared transaction \`21973\` 的事务锁等待。连接本身、节点、会话、锁、prepared transaction、复制和索引统计均可通过 \`psycopg2\` 读取。
+
+健康巡检随后成功采集到真实锁等待，并识别出与 XID \`21973\` 匹配的 prepared transaction。AI 分析阶段还修复了 DeepSeek OpenAI 兼容接口对空 \`function_call\` 字段的 422 错误。
