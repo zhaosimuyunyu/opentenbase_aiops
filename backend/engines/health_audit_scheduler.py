@@ -16,14 +16,13 @@ class HealthAuditScheduler:
         self.config = config or Config()
         self._run_lock = asyncio.Lock()
 
-    async def run_once(self):
+    async def run_once(self, *, scheduled=False):
         if self._run_lock.locked():
             return None
         async with self._run_lock:
-            return await run_in_threadpool(self._run_with_database_lock)
+            return await run_in_threadpool(self._run_with_database_lock, scheduled)
 
-    @staticmethod
-    def _run_with_database_lock():
+    def _run_with_database_lock(self, scheduled):
         kb = PgVectorKnowledgeBase()
         acquired = False
         try:
@@ -33,7 +32,24 @@ class HealthAuditScheduler:
             kb.conn.commit()
             if not acquired:
                 return None
-            return asyncio.run(ReadonlyAuditEngine().run_health_audit())
+            if scheduled:
+                with kb.conn.cursor() as cursor:
+                    cursor.execute("SELECT to_regclass('audit_records')")
+                    if cursor.fetchone()[0] is not None:
+                        cursor.execute(
+                            """SELECT EXISTS (
+                                SELECT 1 FROM audit_records
+                                WHERE audit_type = 'readonly_health_audit'
+                                  AND evidence->>'trigger' = 'scheduled'
+                                  AND created_at > now() - make_interval(secs => %s)
+                            )""",
+                            (self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,),
+                        )
+                        if cursor.fetchone()[0]:
+                            return None
+                kb.conn.commit()
+            trigger = "scheduled" if scheduled else "manual"
+            return asyncio.run(ReadonlyAuditEngine().run_health_audit(trigger=trigger))
         finally:
             if acquired and not kb.conn.closed:
                 try:
@@ -48,7 +64,7 @@ class HealthAuditScheduler:
         while True:
             delay = self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS
             try:
-                result = await self.run_once()
+                result = await self.run_once(scheduled=True)
                 if result:
                     logger.info("Scheduled health audit persisted as %s", result["audit_id"])
                 else:

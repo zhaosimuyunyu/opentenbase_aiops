@@ -234,7 +234,7 @@ async def get_automation_status():
             latest = None
             if audit_table_exists:
                 cursor.execute(
-                    "SELECT audit_id,created_at,risk_level FROM audit_records "
+                    "SELECT audit_id,created_at,risk_level,evidence->>'trigger' AS trigger FROM audit_records "
                     "WHERE audit_type='readonly_health_audit' ORDER BY created_at DESC LIMIT 1"
                 )
                 latest = cursor.fetchone()
@@ -261,6 +261,7 @@ async def list_audits(limit: int = 20, offset: int = 0, audit_type: Optional[str
             cursor.execute(
                 """SELECT audit_id, audit_type, created_at, risk_level, status,
                           evidence->>'collection_status' AS collection_status,
+                          evidence->>'trigger' AS trigger,
                           jsonb_array_length(COALESCE(evidence->'findings', '[]'::jsonb)) AS finding_count,
                           jsonb_array_length(COALESCE(knowledge_refs, '[]'::jsonb)) AS reference_count
                    FROM audit_records

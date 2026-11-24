@@ -37,10 +37,25 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
             result = await HealthAuditScheduler().run_once()
 
         self.assertEqual(result, audit_result)
-        engine.return_value.run_health_audit.assert_awaited_once()
+        engine.return_value.run_health_audit.assert_awaited_once_with(trigger="manual")
         self.assertEqual(cursor.execute.call_count, 2)
         knowledge_base.conn.commit.assert_any_call()
         knowledge_base.close.assert_called_once()
+
+    async def test_skips_scheduled_audit_with_recent_persisted_record(self):
+        store = MagicMock()
+        store.conn.closed = False
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [(True,), ("audit_records",), (True,)]
+
+        with patch(
+            "backend.engines.health_audit_scheduler.PgVectorKnowledgeBase", return_value=store
+        ), patch("backend.engines.health_audit_scheduler.ReadonlyAuditEngine") as engine:
+            result = await HealthAuditScheduler().run_once(scheduled=True)
+
+        self.assertIsNone(result)
+        engine.assert_not_called()
+        store.close.assert_called_once()
 
     async def test_skips_audit_when_local_run_is_already_active(self):
         scheduler = HealthAuditScheduler()
