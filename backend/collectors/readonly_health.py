@@ -122,8 +122,16 @@ class ReadonlyHealthCollector:
                     connection.rollback()
                     errors[name] = _collection_error(error)
             nodes = results.get("nodes", [])
-            if nodes:
-                results["node_connectivity"] = self._probe_node_connectivity(nodes)
+            if "nodes" in results:
+                connectivity = self._probe_node_connectivity(nodes)
+                results["node_connectivity"] = connectivity
+                for node in connectivity:
+                    if node["status"] != "reachable":
+                        errors[f"node_connectivity:{node['node_name']}"] = {
+                            "type": "NodeConnectivity",
+                            "message": node["error"] or "Node endpoint is unavailable",
+                        }
+            if any(node.get("node_type") == "D" for node in nodes):
                 node_stats, node_stats_errors = self._collect_data_node_stats(
                     connection, nodes, table=table
                 )
@@ -134,6 +142,11 @@ class ReadonlyHealthCollector:
                 )
                 results["data_node_prepared_transactions"] = prepared
                 errors.update(prepared_errors)
+            elif "nodes" in results:
+                errors["data_node_stats:topology"] = {
+                    "type": "MissingDataNodes",
+                    "message": "No data nodes are registered",
+                }
         except Exception as error:
             errors["connection"] = _collection_error(error)
         finally:

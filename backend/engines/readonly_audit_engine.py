@@ -214,7 +214,7 @@ class ReadonlyAuditEngine:
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
         cluster_node_errors = {
             name for name in snapshot['errors']
-            if name.startswith('data_node_prepared_transactions:')
+            if name.startswith(('data_node_prepared_transactions:', 'node_connectivity:'))
         }
         cluster_errors.update(cluster_node_errors)
         performance_errors = performance_checks.intersection(snapshot['errors'])
