@@ -17,7 +17,10 @@ from backend.collectors.readonly_health import CHECKS, ReadonlyHealthCollector
 
 
 PROBES = {
-    "connection_identity": "SELECT version(), current_database(), current_user",
+    "connection_identity": """
+        SELECT version(), current_database(), current_user, rolsuper
+        FROM pg_catalog.pg_roles WHERE rolname = current_user
+    """,
     "database_identity": CHECKS["database_identity"],
     "cluster_nodes": "SELECT node_name, node_type, node_host, node_port FROM pgxc_node ORDER BY node_type, node_name",
     "activity": CHECKS["connections"],
@@ -48,6 +51,9 @@ def main() -> int:
     if args.table and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", args.table):
         parser.error("--table must use schema.table format")
     config = Config()
+    separate_repair_role = bool(
+        config.AIOPS_REPAIR_DB_USER and config.AIOPS_REPAIR_DB_USER != config.DB_USER
+    )
     if args.repair_account:
         if not config.AIOPS_REPAIR_DB_USER:
             parser.error("--repair-account requires AIOPS_REPAIR_DB_USER")
@@ -56,6 +62,7 @@ def main() -> int:
     report = {
         "target": {"host": config.DB_HOST, "port": config.DB_PORT, "database": config.DB_NAME, "user": config.DB_USER},
         "driver": "psycopg2",
+        "separate_repair_role_configured": separate_repair_role,
         "probes": {},
         "node_connectivity": [],
     }
@@ -92,6 +99,8 @@ def main() -> int:
                     raise ValueError("Database identity is missing or does not match the configured database")
                 connection.rollback()
                 report["probes"][name] = {"status": "pass", "row_count": len(rows), "columns": list(rows[0]) if rows else []}
+                if name == "connection_identity":
+                    report["probes"][name]["is_superuser"] = rows[0]["rolsuper"] if rows else None
                 if name == "cluster_nodes":
                     for node in rows:
                         host, port = node.get("node_host"), node.get("node_port")
