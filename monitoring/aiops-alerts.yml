@@ -33,3 +33,8 @@ groups:
         for: 2m
         annotations:
           summary: "Latest scheduled OpenTenBase audit used fallback diagnosis for at least one target"
+      - alert: OpenTenBaseRepairReviewRequired
+        expr: aiops_repair_review_count{job="opentenbase-aiops"} > 0
+        for: 1m
+        annotations:
+          summary: "OpenTenBase repair requests require manual review"

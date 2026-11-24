@@ -241,6 +241,18 @@ def get_automation_status():
             latest_scheduled_at = None
             latest_scheduled_collection_status = None
             scheduled_targets = []
+            repair_review_count = 0
+            cursor.execute("SELECT to_regclass('repair_requests') AS repair_table")
+            if cursor.fetchone()["repair_table"] is not None:
+                cursor.execute("""
+                    SELECT count(*) AS review_count
+                    FROM repair_requests AS request
+                    WHERE to_jsonb(request)->>'manual_review' IS NULL
+                      AND (status = 'unverified' OR
+                           (status = 'executing' AND
+                            COALESCE(approved_at, created_at) < now() - interval '5 minutes'))
+                """)
+                repair_review_count = cursor.fetchone()["review_count"]
             if audit_table_exists:
                 cursor.execute(
                     """SELECT * FROM (
@@ -290,6 +302,7 @@ def get_automation_status():
             "latest_scheduled_at": latest_scheduled_at,
             "latest_scheduled_collection_status": latest_scheduled_collection_status,
             "scheduled_targets": scheduled_targets,
+            "repair_review_count": repair_review_count,
         }
     except Exception as error:
         logger.exception("Failed to read automation status")
@@ -336,6 +349,8 @@ def audit_metrics():
     metrics.append("# TYPE aiops_health_audit_scheduled_analysis_degraded gauge")
     analysis_degraded = any(row["analysis_fallback"] for row in status["scheduled_targets"])
     metrics.append(f"aiops_health_audit_scheduled_analysis_degraded {int(analysis_degraded)}")
+    metrics.append("# TYPE aiops_repair_review_count gauge")
+    metrics.append(f"aiops_repair_review_count {status['repair_review_count']}")
     return PlainTextResponse("\n".join(metrics) + "\n", media_type="text/plain; version=0.0.4")
 
 
