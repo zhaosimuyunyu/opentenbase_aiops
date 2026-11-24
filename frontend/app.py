@@ -111,6 +111,12 @@ with st.sidebar:
 def render_analysis_status(analysis):
     if not isinstance(analysis, dict):
         return
+    tool_errors = set(analysis.get("tool_errors") or [])
+    if "KnowledgeToolCallLimit" in tool_errors:
+        st.warning("已达到本次巡检的知识检索次数上限")
+        tool_errors.remove("KnowledgeToolCallLimit")
+    if tool_errors:
+        st.warning(f"模型发起的知识检索失败（{' · '.join(sorted(tool_errors))}）")
     retrieval_error = analysis.get("fallback_knowledge_error")
     if retrieval_error:
         details = retrieval_error["type"]
