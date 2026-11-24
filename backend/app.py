@@ -245,12 +245,15 @@ def get_automation_status():
                 latest = cursor.fetchone()
                 cursor.execute(
                     "SELECT max(created_at) AS latest_scheduled_at FROM audit_records "
-                    "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled'"
+                    "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled' "
+                    "AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text",
+                    (config.AIOPS_AUTO_AUDIT_TABLE,),
                 )
                 latest_scheduled_at = cursor.fetchone()["latest_scheduled_at"]
         return {
             "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
+            "statistics_target": config.AIOPS_AUTO_AUDIT_TABLE,
             "latest_audit": dict(latest) if latest else None,
             "latest_scheduled_at": latest_scheduled_at,
         }

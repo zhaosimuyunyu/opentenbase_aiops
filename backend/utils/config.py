@@ -1,5 +1,6 @@
 """Configuration management"""
 import os
+import re
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -39,6 +40,11 @@ class Config:
     AIOPS_AUTO_AUDIT_INTERVAL_SECONDS: int = max(
         60, int(os.getenv("AIOPS_AUTO_AUDIT_INTERVAL_SECONDS", "900"))
     )
+    AIOPS_AUTO_AUDIT_TABLE = os.getenv("AIOPS_AUTO_AUDIT_TABLE", "").strip() or None
+    if AIOPS_AUTO_AUDIT_TABLE and not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", AIOPS_AUTO_AUDIT_TABLE
+    ):
+        raise ValueError("AIOPS_AUTO_AUDIT_TABLE must use schema.table format")
 
     # Vector Store
     CHROMA_PERSIST_DIRECTORY: str = os.getenv(

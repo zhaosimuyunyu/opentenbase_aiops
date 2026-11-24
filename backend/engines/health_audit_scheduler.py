@@ -41,9 +41,10 @@ class HealthAuditScheduler:
                                 SELECT 1 FROM audit_records
                                 WHERE audit_type = 'readonly_health_audit'
                                   AND evidence->>'trigger' = 'scheduled'
+                                  AND (evidence->>'statistics_target') IS NOT DISTINCT FROM %s::text
                                   AND created_at > now() - make_interval(secs => %s)
                             )""",
-                            (self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,),
+                            (table, self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS),
                         )
                         if cursor.fetchone()[0]:
                             return None
@@ -65,7 +66,9 @@ class HealthAuditScheduler:
         while True:
             delay = self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS
             try:
-                result = await self.run_once(scheduled=True)
+                result = await self.run_once(
+                    scheduled=True, table=self.config.AIOPS_AUTO_AUDIT_TABLE
+                )
                 if result:
                     logger.info("Scheduled health audit persisted as %s", result["audit_id"])
                 else:
