@@ -373,23 +373,45 @@ elif page == "🧾 修复审批":
     st.markdown('<div class="main-header">🧾 修复审批</div>', unsafe_allow_html=True)
     api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
     try:
-        items = requests.get(f"{api_base}/api/repairs", params={"limit": 50}, timeout=10).json().get("items", [])
+        response = requests.get(f"{api_base}/api/repairs", params={"limit": 50}, timeout=10)
+        response.raise_for_status()
+        decision = st.session_state.pop("repair_decision", None)
+        if decision:
+            st.json(decision)
+        items = response.json().get("items", [])
         if not items:
             st.info("暂无修复请求")
         for item in items:
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 st.json({"parameters": item.get("parameters"), "evidence": item.get("evidence"), "reason": item.get("reason")})
+                if item.get("approved_at"):
+                    st.write("审核记录", item["approved_at"], item.get("approved_by"))
+                if item["status"] == "executing":
+                    st.warning("执行结果尚未入库。进程中断时此状态可能保留，请核对目标库统计和服务日志。")
+                elif item["status"] == "unverified":
+                    st.warning("执行结果未通过复查，请核对各 DN 的统计时间戳。")
+                elif item["status"] == "failed":
+                    st.error("修复执行失败")
+                if item.get("result") is not None:
+                    st.write("已保存的处置结果")
+                    st.json(item["result"])
                 if item["status"] == "pending":
                     approver = st.session_state.config.AIOPS_APPROVER_ID
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)
                     if left.button("批准并执行", key=f"approve-{item['request_id']}"):
                         response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/approve", json={"approver": approver, "token": token}, timeout=30)
-                        st.json(response.json())
+                        if response.ok:
+                            st.session_state.repair_decision = response.json()
+                            st.rerun()
+                        st.error(response.text)
                     reject_reason = right.text_input("拒绝原因", key=f"r-{item['request_id']}")
                     if right.button("拒绝", key=f"reject-{item['request_id']}"):
                         response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/reject", json={"approver": approver, "reason": reject_reason, "token": token}, timeout=10)
-                        st.json(response.json())
+                        if response.ok:
+                            st.session_state.repair_decision = response.json()
+                            st.rerun()
+                        st.error(response.text)
     except Exception as error:
         st.error(f"读取修复审批失败: {error}")
 
