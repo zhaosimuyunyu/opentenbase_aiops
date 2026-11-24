@@ -7,6 +7,18 @@ from ..tools.knowledge_search_tool import TOOL_SCHEMA, execute_search_knowledge
 MAX_KNOWLEDGE_TOOL_CALLS = 3
 
 
+class InvalidCompletionResponse(Exception):
+    pass
+
+
+def _completion_message(response):
+    choices = getattr(response, 'choices', None)
+    message = getattr(choices[0], 'message', None) if choices else None
+    if message is None:
+        raise InvalidCompletionResponse
+    return message
+
+
 def _model_evidence(value):
     if isinstance(value, dict):
         return {
@@ -41,9 +53,9 @@ class AIOpsAgent:
             response = self.client.chat.completions.create(
                 model=self.model, messages=messages, tools=[TOOL_SCHEMA], tool_choice='auto'
             )
-        except (APIConnectionError, APIStatusError) as error:
+            first = _completion_message(response)
+        except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
             return self._fallback_diagnosis(context, error)
-        first = response.choices[0].message
         refs = []
         tool_errors = []
         if first.tool_calls:
@@ -74,8 +86,8 @@ class AIOpsAgent:
                 refs.extend(result.get('results', []))
                 messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': json.dumps(result, ensure_ascii=False)})
             try:
-                final = self.client.chat.completions.create(model=self.model, messages=messages).choices[0].message
-            except (APIConnectionError, APIStatusError) as error:
+                final = _completion_message(self.client.chat.completions.create(model=self.model, messages=messages))
+            except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
                 return {**self._fallback_diagnosis(context, error, refs, True), 'tool_errors': tool_errors}
         else:
             final = first
@@ -98,8 +110,8 @@ class AIOpsAgent:
                 report = self.client.chat.completions.create(
                     model=self.model, messages=report_messages
                 )
-                content = report.choices[0].message.content or ''
-            except (APIConnectionError, APIStatusError) as error:
+                content = _completion_message(report).content or ''
+            except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
                 return {**self._fallback_diagnosis(
                     context, error, refs, bool(first.tool_calls)
                 ), 'tool_errors': tool_errors}

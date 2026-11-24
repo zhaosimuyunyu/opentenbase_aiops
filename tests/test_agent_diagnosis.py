@@ -7,6 +7,15 @@ from backend.ai.agent_client import AIOpsAgent
 
 class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_report_preserves_retrieved_references(self):
+        await self._check_failed_report(
+            [SimpleNamespace(message=SimpleNamespace(content='{"risk_level":"high"}'))],
+            "InvalidDiagnosticReport",
+        )
+
+    async def test_empty_completion_preserves_retrieved_references(self):
+        await self._check_failed_report([], "InvalidCompletionResponse")
+
+    async def _check_failed_report(self, final_choices, expected_error):
         config = SimpleNamespace(
             DEEPSEEK_API_KEY="fixture-key",
             DEEPSEEK_API_BASE="https://example.invalid/v1",
@@ -22,14 +31,13 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         first = SimpleNamespace(content=None, tool_calls=[tool_call])
-        final = SimpleNamespace(content='{"risk_level":"high"}')
         references = [{"source_url": "https://example.invalid/locks"}]
         context = {"locks": [{"query": "fixture SQL", "message": "fixture detail", "sqlstate": "55P03"}]}
         with patch.object(
             agent.client.chat.completions, "create",
             new=Mock(side_effect=[
                 SimpleNamespace(choices=[SimpleNamespace(message=first)]),
-                SimpleNamespace(choices=[SimpleNamespace(message=final)]),
+                SimpleNamespace(choices=final_choices),
             ]),
         ) as completion, patch(
             "backend.ai.agent_client.execute_search_knowledge",
@@ -45,5 +53,5 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context["locks"][0]["query"], "fixture SQL")
         self.assertTrue(report["analysis_fallback"])
         self.assertTrue(report["tool_called"])
-        self.assertEqual(report["ai_error"], "InvalidDiagnosticReport")
+        self.assertEqual(report["ai_error"], expected_error)
         self.assertEqual(report["knowledge_refs"], references)
