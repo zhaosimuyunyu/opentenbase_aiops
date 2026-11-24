@@ -48,10 +48,12 @@ class RepairWorkflow:
         if not data_nodes:
             raise ValueError("No OpenTenBase data nodes are registered")
 
+        qualified_name = sql.Identifier(schema_name, table_name).as_string(connection)
         remote_query = sql.SQL(
-            "SELECT n_live_tup,n_mod_since_analyze,last_analyze "
-            "FROM pg_stat_user_tables WHERE schemaname={} AND relname={}"
-        ).format(sql.Literal(schema_name), sql.Literal(table_name)).as_string(connection)
+            "SELECT pg_stat_get_live_tuples(oid), pg_stat_get_mod_since_analyze(oid), "
+            "pg_stat_get_last_analyze_time(oid) FROM pg_catalog.pg_class "
+            "WHERE oid = pg_catalog.to_regclass({}) AND relkind IN ('r', 'p')"
+        ).format(sql.Literal(qualified_name)).as_string(connection)
         per_node = []
         for node_name in data_nodes:
             with connection.cursor() as cursor:
