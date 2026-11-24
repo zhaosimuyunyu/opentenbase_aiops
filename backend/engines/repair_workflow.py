@@ -2,6 +2,7 @@ import re
 import hmac
 import json
 import uuid
+from copy import copy
 from time import sleep
 from datetime import datetime, timezone
 
@@ -199,7 +200,11 @@ class RepairWorkflow:
                 )
                 # Persist the claim before issuing SQL on the separate OpenTenBase connection.
                 kb.conn.commit()
-                db = OpenTenBaseConnector(self.config)
+                repair_config = copy(self.config)
+                if repair_config.AIOPS_REPAIR_DB_USER:
+                    repair_config.DB_USER = repair_config.AIOPS_REPAIR_DB_USER
+                    repair_config.DB_PASSWORD = repair_config.AIOPS_REPAIR_DB_PASSWORD
+                db = OpenTenBaseConnector(repair_config)
                 execution_attempted = False
                 try:
                     conn = db.connect()

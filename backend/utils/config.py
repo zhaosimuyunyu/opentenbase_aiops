@@ -18,6 +18,8 @@ class Config:
     DB_NAME: str = os.getenv("DB_NAME", "postgres")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")  # 可选，容器内 Unix socket 可能不需要
     DB_TYPE: str = os.getenv("DB_TYPE", "postgresql")  # 参考 AgentX
+    AIOPS_REPAIR_DB_USER: str = os.getenv("AIOPS_REPAIR_DB_USER", "")
+    AIOPS_REPAIR_DB_PASSWORD: str = os.getenv("AIOPS_REPAIR_DB_PASSWORD", "")
 
     @property
     def audit_target(self):
