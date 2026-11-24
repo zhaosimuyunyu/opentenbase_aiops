@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
@@ -226,29 +227,63 @@ async def run_readonly_health_audit():
 
 
 @app.get("/api/automation/status")
-async def get_automation_status():
+def get_automation_status():
     kb = PgVectorKnowledgeBase()
     try:
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('public.audit_records') AS audit_table")
             audit_table_exists = cursor.fetchone()["audit_table"] is not None
             latest = None
+            latest_scheduled_at = None
             if audit_table_exists:
                 cursor.execute(
                     "SELECT audit_id,created_at,risk_level,evidence->>'trigger' AS trigger FROM audit_records "
                     "WHERE audit_type='readonly_health_audit' ORDER BY created_at DESC LIMIT 1"
                 )
                 latest = cursor.fetchone()
+                cursor.execute(
+                    "SELECT max(created_at) AS latest_scheduled_at FROM audit_records "
+                    "WHERE audit_type='readonly_health_audit' AND evidence->>'trigger'='scheduled'"
+                )
+                latest_scheduled_at = cursor.fetchone()["latest_scheduled_at"]
         return {
             "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
             "latest_audit": dict(latest) if latest else None,
+            "latest_scheduled_at": latest_scheduled_at,
         }
     except Exception as error:
         logger.exception("Failed to read automation status")
         raise HTTPException(status_code=503, detail="Automation status is unavailable") from error
     finally:
         kb.close()
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def audit_metrics():
+    status = get_automation_status()
+    latest = status["latest_audit"]
+    scheduled = status["latest_scheduled_at"]
+    risk = latest["risk_level"] if latest else None
+    levels = ("low", "medium", "high", "critical", "unknown")
+    if latest and risk not in levels:
+        risk = "unknown"
+    metrics = [
+        "# TYPE aiops_health_audit_schedule_enabled gauge",
+        f"aiops_health_audit_schedule_enabled {int(status['automatic_health_audit_enabled'])}",
+        "# TYPE aiops_health_audit_interval_seconds gauge",
+        f"aiops_health_audit_interval_seconds {status['interval_seconds']}",
+        "# TYPE aiops_health_audit_latest_timestamp_seconds gauge",
+        f"aiops_health_audit_latest_timestamp_seconds {latest['created_at'].timestamp() if latest else 0}",
+        "# TYPE aiops_health_audit_latest_scheduled_timestamp_seconds gauge",
+        f"aiops_health_audit_latest_scheduled_timestamp_seconds {scheduled.timestamp() if scheduled else 0}",
+        "# TYPE aiops_health_audit_latest_risk gauge",
+    ]
+    metrics.extend(
+        f'aiops_health_audit_latest_risk{{level="{level}"}} {int(risk == level)}'
+        for level in levels
+    )
+    return PlainTextResponse("\n".join(metrics) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/audits")

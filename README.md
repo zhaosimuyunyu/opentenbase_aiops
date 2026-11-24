@@ -124,6 +124,13 @@ opentenbase-aiops/
 | `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` | 周期巡检间隔秒数，最小 60 秒 | `900` |
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 
+### Prometheus 告警
+
+将 AIOps API 的 `/metrics` 加入现有 Prometheus，抓取任务名设为 `opentenbase-aiops`。
+在同一 Docker 网络中使用 `aiops-api:8000`，在宿主机运行 Prometheus 时使用 `127.0.0.1:8000`。
+通过 Prometheus 的 `rule_files` 加载仓库中的 `monitoring/aiops-alerts.yml`，并用现有 Alertmanager 路由投递告警。
+规则覆盖最近一次巡检的高风险状态、启用定时巡检后的记录超期以及指标抓取失败。
+
 周期巡检默认关闭。配置启用后由 API 服务定期运行只读健康审计，结果写入巡检历史。多 API 实例通过知识库 PostgreSQL advisory lock 选出单一巡检者。手动巡检也经过 API 并使用同一把锁。
 
 ### OpenTenBase 连接
