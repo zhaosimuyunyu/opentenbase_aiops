@@ -342,6 +342,9 @@ def list_audits(
     try:
         kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
+            if cursor.fetchone()["audit_table"] is None:
+                return {"items": [], "limit": limit, "offset": offset}
             cursor.execute(
                 """SELECT audit_id, audit_type, created_at, risk_level, status,
                           evidence->>'collection_status' AS collection_status,
@@ -368,12 +371,15 @@ def list_audits(
 
 
 @app.get("/api/audits/{audit_id}")
-async def get_audit(audit_id: str):
+def get_audit(audit_id: str):
     """Return the stored evidence and diagnosis for one audit."""
     kb = None
     try:
         kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
+            if cursor.fetchone()["audit_table"] is None:
+                raise HTTPException(status_code=404, detail="Audit not found")
             cursor.execute(
                 """SELECT audit_id, audit_type, created_at, risk_level, status,
                           evidence, ai_analysis, knowledge_refs
@@ -401,6 +407,9 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
     try:
         kb = PgVectorKnowledgeBase()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
+            if cursor.fetchone()["audit_table"] is None:
+                raise HTTPException(status_code=404, detail="Audit not found")
             cursor.execute("SELECT evidence, knowledge_refs FROM audit_records WHERE audit_id=%s", (audit_id,))
             record = cursor.fetchone()
         if not record:
