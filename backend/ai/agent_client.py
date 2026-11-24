@@ -1,6 +1,6 @@
 import json
 import re
-from openai import OpenAI, APITimeoutError, APIConnectionError
+from openai import OpenAI, APIConnectionError, APIStatusError
 from ..utils.config import Config
 from ..tools.knowledge_search_tool import TOOL_SCHEMA, execute_search_knowledge
 
@@ -35,8 +35,8 @@ class AIOpsAgent:
             response = self.client.chat.completions.create(
                 model=self.model, messages=messages, tools=[TOOL_SCHEMA], tool_choice='auto'
             )
-        except (APITimeoutError, APIConnectionError) as error:
-            return self._fallback_diagnosis(context, type(error).__name__)
+        except (APIConnectionError, APIStatusError) as error:
+            return self._fallback_diagnosis(context, error)
         first = response.choices[0].message
         refs = []
         if first.tool_calls:
@@ -60,8 +60,8 @@ class AIOpsAgent:
                     messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': json.dumps(result, ensure_ascii=False)})
             try:
                 final = self.client.chat.completions.create(model=self.model, messages=messages).choices[0].message
-            except (APITimeoutError, APIConnectionError) as error:
-                return self._fallback_diagnosis(context, type(error).__name__, refs, True)
+            except (APIConnectionError, APIStatusError) as error:
+                return self._fallback_diagnosis(context, error, refs, True)
         else:
             final = first
         content = final.content or ''
@@ -84,9 +84,9 @@ class AIOpsAgent:
                     model=self.model, messages=report_messages
                 )
                 content = report.choices[0].message.content or ''
-            except (APITimeoutError, APIConnectionError) as error:
+            except (APIConnectionError, APIStatusError) as error:
                 return self._fallback_diagnosis(
-                    context, type(error).__name__, refs, bool(first.tool_calls)
+                    context, error, refs, bool(first.tool_calls)
                 )
         structured = self._parse_report(content)
         if structured.get('parse_error'):
@@ -181,5 +181,6 @@ class AIOpsAgent:
             'knowledge_refs': refs,
             'tool_called': tool_called,
             'analysis_fallback': True,
-            'ai_error': error,
+            'ai_error': type(error).__name__ if isinstance(error, Exception) else error,
+            **({'ai_http_status': error.status_code} if isinstance(error, APIStatusError) else {}),
         }
