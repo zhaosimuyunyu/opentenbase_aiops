@@ -21,6 +21,16 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 3. 对失败探测记录 SQL 错误和数据库状态。
 4. 分别验收全库采集和目标表采集。目标表提案要求逐 DN 统计完整，执行后复查每个参与节点的 `last_analyze`。
 
+### 真实模型联合验收
+
+在独立测试库使用有两个 DN 的复制测试表。准备足量写入并等待统计刷新，使目标表达到 `stale_table_statistics` 阈值。巡检账号应能读取逐 DN 统计，修复账号应具有目标表的维护权限。配置可调用的 OpenAI 兼容端点后，用 `docker compose up -d aiops-api` 应用环境变量。
+
+1. 调用 `POST /api/audits/health?table=schema.table`，记录审计 ID。用 `GET /api/audits/{audit_id}` 确认目标表发现、各 DN 证据、`ai_analysis.structured.analysis_source=model` 和官方知识引用。HTTP 403、规则回退或空引用均不满足本项验收。
+2. 调用 `POST /api/audits/{audit_id}/repair-requests`，用该发现的零基索引作为 `finding_index`，填写 `reason`。确认提案为 `pending` 且引用原始巡检结果。当前 `ANALYZE` 提案由统计规则生成，模型诊断随提案保存。
+3. 由具名审批人审批，使用审批页或 `POST /api/repairs/{request_id}/approve`。在 `GET /api/repairs` 回读请求，确认审批人、`executed` 状态、各 DN 前后 OID 一致，以及每个目标 DN 的 `last_analyze` 均推进。保留审计 ID 和请求 ID 作为验收记录。
+
+最近一次模型端点探测返回 HTTP 403 `INSUFFICIENT_BALANCE`。上述联合验收仍待执行，下面的模拟模型用例独立记录。
+
 ### 批量统计超时后的修复验收
 
 在真实 OpenTenBase 上用隔离复制表验收。全库巡检保持 `partial`，单表补充采集取得两个 DN 的统计，并生成 `statistics_source=fallback` 的统计过时发现。通过测试客户端调用实际提案和审批端点后，请求状态为 `executed`，两个 DN 的 `last_analyze` 均更新。重复审批返回 HTTP 400。验收使用模拟模型响应，测试表和审计记录已清理。
