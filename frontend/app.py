@@ -430,7 +430,9 @@ elif page == "🧾 修复审批":
             st.info("暂无修复请求")
         for item in items:
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
-                st.json({"parameters": item.get("parameters"), "evidence": item.get("evidence"), "reason": item.get("reason")})
+                proposal_evidence = item.get("evidence") or {}
+                render_analysis_status(proposal_evidence.get("ai_analysis"))
+                st.json({"parameters": item.get("parameters"), "evidence": proposal_evidence, "reason": item.get("reason")})
                 audit_id = item.get("audit_id")
                 if audit_id and st.checkbox("查看原始巡检", key=f"source-audit-{item['request_id']}"):
                     st.caption(f"审计 ID {audit_id}")

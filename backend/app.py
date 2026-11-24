@@ -417,7 +417,10 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
             cursor.execute("SELECT to_regclass('audit_records') AS audit_table")
             if cursor.fetchone()["audit_table"] is None:
                 raise HTTPException(status_code=404, detail="Audit not found")
-            cursor.execute("SELECT evidence, knowledge_refs FROM audit_records WHERE audit_id=%s", (audit_id,))
+            cursor.execute(
+                "SELECT evidence, ai_analysis, knowledge_refs FROM audit_records WHERE audit_id=%s",
+                (audit_id,),
+            )
             record = cursor.fetchone()
         if not record:
             raise HTTPException(status_code=404, detail="Audit not found")
@@ -439,7 +442,11 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
                 raise HTTPException(status_code=400, detail="Data-node statistics are incomplete; rerun the health audit")
         return RepairWorkflow().create_request(
             "analyze_table", {"table": table},
-            {"observation": evidence, "knowledge_refs": record["knowledge_refs"] or []}, request.reason,
+            {
+                "observation": evidence,
+                "ai_analysis": record["ai_analysis"],
+                "knowledge_refs": record["knowledge_refs"] if isinstance(record["knowledge_refs"], list) else [],
+            }, request.reason,
             audit_id, finding
         )
     except HTTPException:
