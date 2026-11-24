@@ -1,10 +1,14 @@
 import json
+import logging
 import uuid
+from ..tools.knowledge_search_tool import execute_search_knowledge
 from ..tools.lock_audit_tool import execute_get_database_locks
 from ..ai.agent_client import AIOpsAgent
 from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
 from ..collectors.readonly_health import ReadonlyHealthCollector
+
+logger = logging.getLogger(__name__)
 
 def _ensure_audit_schema(cursor):
     cursor.execute("""CREATE TABLE IF NOT EXISTS audit_records(
@@ -18,9 +22,22 @@ class ReadonlyAuditEngine:
     @staticmethod
     async def _diagnose(issue, evidence):
         try:
-            return await AIOpsAgent().diagnose(issue, evidence)
+            analysis = await AIOpsAgent().diagnose(issue, evidence)
         except Exception as error:
-            return AIOpsAgent._fallback_diagnosis(evidence, type(error).__name__)
+            analysis = AIOpsAgent._fallback_diagnosis(evidence, type(error).__name__)
+        if analysis.get('analysis_fallback') and not analysis.get('knowledge_refs') and any(
+            finding.get('check') == 'prepared_transaction_blocker'
+            for finding in evidence.get('findings', [])
+        ):
+            try:
+                result = await execute_search_knowledge(
+                    'OpenTenBase prepared transaction pg_prepared_xacts transaction ID lock',
+                    top_k=3,
+                )
+                analysis['knowledge_refs'] = result['results']
+            except Exception:
+                logger.exception('Knowledge retrieval failed during prepared transaction audit')
+        return analysis
 
     async def run_lock_audit(self):
         locks = await execute_get_database_locks(True)
