@@ -349,8 +349,11 @@ elif page == "📜 巡检历史":
     try:
         risks = {"全部": None, "高与严重": "high_or_critical", "仅严重": "critical"}
         risk = risks[st.selectbox("风险等级筛选", list(risks))]
+        table_filter = st.text_input("目标表筛选", placeholder="public.orders").strip()
         response = requests.get(
-            f"{api_base}/api/audits", params={"limit": 50, "risk": risk}, timeout=10
+            f"{api_base}/api/audits",
+            params={"limit": 50, "risk": risk, "table": table_filter or None},
+            timeout=10,
         )
         response.raise_for_status()
         history = response.json()

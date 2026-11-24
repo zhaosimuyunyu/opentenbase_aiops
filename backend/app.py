@@ -337,6 +337,7 @@ def list_audits(
     offset: int = 0,
     audit_type: Optional[str] = None,
     risk: Optional[Literal["high_or_critical", "critical"]] = None,
+    table: Optional[str] = Query(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"),
 ):
     """Return paginated audit summaries without exposing full SQL evidence."""
     limit = max(1, min(limit, 100))
@@ -358,10 +359,11 @@ def list_audits(
                    FROM audit_records
                    WHERE (%s::text IS NULL OR audit_type=%s)
                      AND (%s::text IS NULL OR risk_level = ANY(%s))
+                     AND (%s::text IS NULL OR evidence->>'statistics_target' = %s)
                    ORDER BY created_at DESC, audit_id DESC LIMIT %s OFFSET %s""",
                 (audit_type, audit_type, risk,
                  ["critical"] if risk == "critical" else ["high", "critical"],
-                 limit, offset),
+                 table, table, limit, offset),
             )
             records = [dict(row) for row in cursor.fetchall()]
         return {"items": records, "limit": limit, "offset": offset}
