@@ -2,6 +2,7 @@
 from datetime import datetime
 import socket
 
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
 from ..utils.config import Config
@@ -118,6 +119,11 @@ class ReadonlyHealthCollector:
             nodes = results.get("nodes", [])
             if nodes:
                 results["node_connectivity"] = self._probe_node_connectivity(nodes)
+                node_stats, node_stats_errors = self._collect_data_node_stats(
+                    connection, nodes
+                )
+                results["data_node_table_stats"] = node_stats
+                errors.update(node_stats_errors)
         except Exception as error:
             errors["connection"] = {
                 "type": type(error).__name__,
@@ -155,3 +161,55 @@ class ReadonlyHealthCollector:
                 "error": error,
             })
         return checks
+
+    def _collect_data_node_stats(self, connection, nodes):
+        node_stats = []
+        errors = {}
+        data_nodes = [node for node in nodes if node.get("node_type") == "D"]
+        for node in data_nodes:
+            name = node.get("node_name")
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '2500ms'")
+                    cursor.execute("SET LOCAL lock_timeout = '750ms'")
+                    remote_query = (
+                        "SELECT schemaname,relname,n_live_tup,n_mod_since_analyze,last_analyze "
+                        "FROM pg_stat_user_tables "
+                        "WHERE schemaname NOT IN ('pg_catalog','information_schema') LIMIT 200"
+                    )
+                    cursor.execute(
+                        sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
+                        (remote_query,),
+                    )
+                    columns = [item[0] for item in cursor.description]
+                    node_stats.extend(
+                        {"node_name": name, **dict(zip(columns, row))}
+                        for row in cursor.fetchall()
+                    )
+                connection.rollback()
+            except Exception as error:
+                connection.rollback()
+                errors[f"data_node_stats:{name}"] = {
+                    "type": type(error).__name__,
+                    "message": str(error).strip(),
+                }
+
+        by_table = {}
+        for row in node_stats:
+            key = (row["schemaname"], row["relname"])
+            table = by_table.setdefault(key, {
+                "schemaname": key[0],
+                "tablename": key[1],
+                "live_tuples": 0,
+                "modifications_since_analyze": 0,
+                "nodes": [],
+            })
+            table["live_tuples"] += row.get("n_live_tup") or 0
+            table["modifications_since_analyze"] += row.get("n_mod_since_analyze") or 0
+            table["nodes"].append({
+                "node_name": row["node_name"],
+                "live_tuples": row.get("n_live_tup") or 0,
+                "modifications_since_analyze": row.get("n_mod_since_analyze") or 0,
+                "last_analyze": row.get("last_analyze"),
+            })
+        return list(by_table.values()), errors

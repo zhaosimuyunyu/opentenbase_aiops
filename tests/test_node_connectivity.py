@@ -27,6 +27,31 @@ class NodeConnectivityTests(unittest.TestCase):
 
         self.assertEqual(results[0]["status"], "unknown")
 
+    def test_aggregates_table_statistics_across_data_nodes(self):
+        collector = ReadonlyHealthCollector()
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.description = [(name,) for name in (
+            "schemaname", "relname", "n_live_tup", "n_mod_since_analyze", "last_analyze"
+        )]
+        cursor.fetchall.side_effect = [
+            [("app", "orders", 700, 200, "2026-11-20T00:00:00Z")],
+            [("app", "orders", 500, 300, "2026-11-21T00:00:00Z")],
+        ]
+        nodes = [
+            {"node_name": "dn0001", "node_type": "D"},
+            {"node_name": "cn0001", "node_type": "C"},
+            {"node_name": "dn0002", "node_type": "D"},
+        ]
+
+        tables, errors = collector._collect_data_node_stats(connection, nodes)
+
+        self.assertEqual(errors, {})
+        self.assertEqual(len(tables), 1)
+        self.assertEqual(tables[0]["live_tuples"], 1200)
+        self.assertEqual(tables[0]["modifications_since_analyze"], 500)
+        self.assertEqual([node["node_name"] for node in tables[0]["nodes"]], ["dn0001", "dn0002"])
+
 
 if __name__ == "__main__":
     unittest.main()

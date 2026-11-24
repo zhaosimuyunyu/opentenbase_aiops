@@ -37,6 +37,49 @@ class RepairWorkflow:
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS audit_id text")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS finding jsonb")
 
+    @staticmethod
+    def _read_data_node_stats(connection, schema_name, table_name):
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '2500ms'")
+            cursor.execute("SET LOCAL lock_timeout = '750ms'")
+            cursor.execute("SELECT node_name FROM pgxc_node WHERE node_type='D'")
+            data_nodes = [row[0] for row in cursor.fetchall()]
+        connection.rollback()
+        if not data_nodes:
+            raise ValueError("No OpenTenBase data nodes are registered")
+
+        remote_query = sql.SQL(
+            "SELECT n_live_tup,n_mod_since_analyze,last_analyze "
+            "FROM pg_stat_user_tables WHERE schemaname={} AND relname={}"
+        ).format(sql.Literal(schema_name), sql.Literal(table_name)).as_string(connection)
+        per_node = []
+        for node_name in data_nodes:
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = '2500ms'")
+                cursor.execute("SET LOCAL lock_timeout = '750ms'")
+                cursor.execute(
+                    sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(node_name)),
+                    (remote_query,),
+                )
+                stats = cursor.fetchone()
+            connection.rollback()
+            if stats:
+                per_node.append({
+                    "node_name": node_name,
+                    "live_tuples": stats[0] or 0,
+                    "modifications_since_analyze": stats[1] or 0,
+                    "last_analyze": stats[2],
+                })
+        if not per_node:
+            raise ValueError("Table statistics are unavailable on all OpenTenBase data nodes")
+        return {
+            "live_tuples": sum(node["live_tuples"] for node in per_node),
+            "modifications_since_analyze": sum(
+                node["modifications_since_analyze"] for node in per_node
+            ),
+            "nodes": per_node,
+        }
+
     def create_request(self, operation, parameters, evidence, reason, audit_id=None, finding=None):
         if operation not in ALLOWED_OPERATIONS:
             raise ValueError("Operation is not enabled for execution")
@@ -96,15 +139,15 @@ class RepairWorkflow:
                         schema_name, table_name = (
                             table.split(".", 1) if "." in table else ("public", table)
                         )
-                        target.execute(
-                            "SELECT n_live_tup,n_mod_since_analyze,last_analyze FROM pg_stat_user_tables "
-                            "WHERE schemaname=%s AND relname=%s",
-                            (schema_name, table_name),
-                        )
-                        stats = target.fetchone()
-                        if not stats:
-                            raise ValueError("Table statistics are unavailable for the approved table")
-                        live_tuples, modifications, previous_analyze = stats
+                    stats = self._read_data_node_stats(conn, schema_name, table_name)
+                    live_tuples = stats["live_tuples"]
+                    modifications = stats["modifications_since_analyze"]
+                    previous_by_node = {
+                        item["node_name"]: item["last_analyze"] for item in stats["nodes"]
+                    }
+                    with conn.cursor() as target:
+                        target.execute("SET LOCAL statement_timeout = '10s'")
+                        target.execute("SET LOCAL lock_timeout = '1s'")
                         if (modifications or 0) < max(1000, (live_tuples or 0) * 0.2):
                             raise ValueError("The original ANALYZE finding is no longer present")
                         execution_attempted = True
@@ -112,17 +155,16 @@ class RepairWorkflow:
                             sql.SQL("ANALYZE {}").format(_identifier(table))
                         )
                     conn.commit()
-                    with conn.cursor() as target:
-                        target.execute("SET LOCAL statement_timeout = '3s'")
-                        target.execute("SET LOCAL lock_timeout = '1s'")
-                        target.execute(
-                            "SELECT last_analyze FROM pg_stat_user_tables "
-                            "WHERE schemaname=%s AND relname=%s",
-                            (schema_name, table_name),
-                        )
-                        verified = target.fetchone()
-                    last_analyze = verified[0] if verified else None
-                    advanced = bool(last_analyze and (previous_analyze is None or last_analyze > previous_analyze))
+                    post_stats = self._read_data_node_stats(conn, schema_name, table_name)
+                    current_by_node = {
+                        item["node_name"]: item["last_analyze"] for item in post_stats["nodes"]
+                    }
+                    advanced_nodes = [
+                        node_name for node_name, previous in previous_by_node.items()
+                        if node_name in current_by_node and current_by_node[node_name]
+                        and (previous is None or current_by_node[node_name] > previous)
+                    ]
+                    advanced = bool(previous_by_node) and len(advanced_nodes) == len(previous_by_node)
                     result = {
                         "success": advanced,
                         "operation": operation,
@@ -130,9 +172,21 @@ class RepairWorkflow:
                         "precondition": {
                             "live_tuples_estimate": live_tuples,
                             "modifications_since_analyze": modifications,
+                            "data_nodes": [
+                                {
+                                    **node,
+                                    "last_analyze": node["last_analyze"].isoformat()
+                                    if node["last_analyze"] else None,
+                                }
+                                for node in stats["nodes"]
+                            ],
                         },
                         "postcondition": {
-                            "last_analyze": last_analyze.isoformat() if last_analyze else None,
+                            "last_analyze_by_node": {
+                                node_name: timestamp.isoformat() if timestamp else None
+                                for node_name, timestamp in current_by_node.items()
+                            },
+                            "advanced_nodes": advanced_nodes,
                             "verified": advanced,
                         },
                         "executed_at": datetime.now(timezone.utc).isoformat(),

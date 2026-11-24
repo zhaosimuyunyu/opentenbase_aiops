@@ -56,7 +56,7 @@ class ReadonlyAuditEngine:
                     'prepared_transactions', 'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
-                        'table_stats', 'index_usage')}
+                    'table_stats', 'index_usage', 'data_node_table_stats')}
         findings = []
         lock_rows = checks.get('locks')
         blocked_locks = [row for row in lock_rows or [] if not row['granted']]
@@ -137,7 +137,7 @@ class ReadonlyAuditEngine:
                     'observed': f"Replication replay lag is {lag_seconds:.1f} seconds",
                     'evidence': row,
                 })
-        table_stats = checks.get('table_stats') or []
+        table_stats = checks.get('data_node_table_stats') or []
         for table in table_stats:
             live = table.get('live_tuples') or 0
             modifications = table.get('modifications_since_analyze') or 0
@@ -148,6 +148,7 @@ class ReadonlyAuditEngine:
                     'evidence': {
                         'schema': table['schemaname'], 'table': table['tablename'],
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
+                        'nodes': table.get('nodes', []),
                     },
                 })
             dead = table.get('dead_tuples') or 0
@@ -180,6 +181,10 @@ class ReadonlyAuditEngine:
         }
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
         performance_errors = performance_checks.intersection(snapshot['errors'])
+        performance_node_errors = {
+            name for name in snapshot['errors'] if name.startswith('data_node_stats:')
+        }
+        performance_errors.update(performance_node_errors)
         unreachable_nodes = any(
             node.get('status') == 'unreachable'
             for node in checks.get('node_connectivity', [])

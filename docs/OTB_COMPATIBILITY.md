@@ -19,10 +19,10 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 API 容器能够通过 psycopg2 连接 OpenTenBase_v5.0 的 CN，读取节点注册信息、会话、锁、prepared transaction 和复制视图。完整健康巡检生成了审计记录并回读到 5 条知识引用。
 
-同一次巡检的节点连通性结果为：CN、DN1 和 GTM 可达，DN2 `172.28.50.12:11006` 拒绝连接。DN2 数据目录中的 `postmaster.pid` 记录的 PID 当前不存在，但尝试启动时 OpenTenBase 检测到 PID 冲突并拒绝启动。未删除 PID 文件或处理预备事务。
+首次巡检发现 DN2 `172.28.50.12:11006` 拒绝连接。检查确认数据目录的 `postmaster.pid` 已过期后，备份该文件并以 `pg_ctl -Z datanode` 恢复 DN2。恢复后 CN、DN1、DN2 和 GTM 的 TCP 探测均通过。
 
-由于 DN2 不可达，跨节点建表探针返回 `InsufficientResources`，提示连接 DN2 失败。最近一次只读 SQL 兼容性验证中，8 项探针 7 项通过，表统计因锁超时失败，索引统计通过。因此当前状态是“CN 协议连接已验证，完整集群可用性不通过”，不能声称修复执行链路已端到端验收。
+恢复 DN2 后，隔离建表验证仍因现存 prepared transaction `21973` 造成的锁超时而未完成。最近一次只读 SQL 兼容性验证中，8 项探针 7 项通过，表统计因锁超时失败，索引统计通过。节点网络可达，但完整 SQL 兼容性尚未通过。
 
-隔离 ANALYZE 测试没有创建持久对象。批准执行端点也尚未实测，API 当前没有配置 `AIOPS_APPROVAL_TOKEN`。
+巡检现在通过 `EXECUTE DIRECT ON` 分别读取各 DN 的 `pg_stat_user_tables` 并聚合统计。当前两台 DN 的统计查询均因 prepared transaction 锁超时而失败，因此审计不会生成 ANALYZE 提案。批准执行端点也尚未实测，API 当前没有配置 `AIOPS_APPROVAL_TOKEN`。
 
 健康巡检采集到真实锁等待，并识别出与 XID `21973` 匹配的 prepared transaction。AI 分析阶段还修复了 DeepSeek OpenAI 兼容接口对空 `function_call` 字段的 422 错误。
