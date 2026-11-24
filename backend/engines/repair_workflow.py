@@ -232,6 +232,11 @@ class RepairWorkflow:
                             audited_identity.get("system_identifier"), audited_identity.get("database")
                         ):
                             raise ValueError("Audited database identity changed or is missing; rerun the health audit")
+                        target.execute(
+                            "SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user"
+                        )
+                        if database_session_user != repair_user or target.fetchone() != (False,):
+                            raise ValueError("Repair execution requires the configured non-superuser account")
                         schema_name, table_name = (
                             table.split(".", 1) if "." in table else ("public", table)
                         )
