@@ -178,9 +178,10 @@ class ReadonlyHealthCollector:
                     cursor.execute("SET LOCAL statement_timeout = '2500ms'")
                     cursor.execute("SET LOCAL lock_timeout = '750ms'")
                     remote_query = (
-                        "SELECT schemaname,relname,n_live_tup,n_mod_since_analyze,last_analyze "
+                        "SELECT schemaname,relname,n_live_tup,n_dead_tup,n_mod_since_analyze,last_analyze "
                         "FROM pg_stat_user_tables "
-                        "WHERE schemaname NOT IN ('pg_catalog','information_schema') LIMIT 200"
+                        "WHERE schemaname NOT IN ('pg_catalog','information_schema') "
+                        "ORDER BY schemaname, relname LIMIT 201"
                     )
                     if table:
                         schema, relation = table.split(".", 1)
@@ -188,6 +189,7 @@ class ReadonlyHealthCollector:
                         remote_query = sql.SQL(
                             "SELECT {}::text AS schemaname, relname, "
                             "pg_stat_get_live_tuples(oid) AS n_live_tup, "
+                            "pg_stat_get_dead_tuples(oid) AS n_dead_tup, "
                             "pg_stat_get_mod_since_analyze(oid) AS n_mod_since_analyze, "
                             "pg_stat_get_last_analyze_time(oid) AS last_analyze "
                             "FROM pg_catalog.pg_class WHERE oid=pg_catalog.to_regclass({}) "
@@ -199,6 +201,12 @@ class ReadonlyHealthCollector:
                     )
                     columns = [item[0] for item in cursor.description]
                     rows = cursor.fetchall()
+                    if len(rows) > 200:
+                        errors[f"data_node_stats:{name}"] = {
+                            "type": "CollectionLimit",
+                            "message": "Only the first 200 tables were collected",
+                        }
+                        rows = rows[:200]
                     if table and not rows:
                         raise ValueError("Target table statistics are unavailable on this node")
                     node_stats.extend(
@@ -220,14 +228,17 @@ class ReadonlyHealthCollector:
                 "schemaname": key[0],
                 "tablename": key[1],
                 "live_tuples": 0,
+                "dead_tuples": 0,
                 "modifications_since_analyze": 0,
                 "nodes": [],
             })
             table["live_tuples"] += row.get("n_live_tup") or 0
+            table["dead_tuples"] += row.get("n_dead_tup") or 0
             table["modifications_since_analyze"] += row.get("n_mod_since_analyze") or 0
             table["nodes"].append({
                 "node_name": row["node_name"],
                 "live_tuples": row.get("n_live_tup") or 0,
+                "dead_tuples": row.get("n_dead_tup") or 0,
                 "modifications_since_analyze": row.get("n_mod_since_analyze") or 0,
                 "last_analyze": row.get("last_analyze"),
             })

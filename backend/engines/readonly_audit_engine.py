@@ -171,7 +171,7 @@ class ReadonlyAuditEngine:
             dead = table.get('dead_tuples') or 0
             total = live + dead
             dead_ratio = dead / total if total else 0
-            if dead >= 1000 and dead_ratio >= 0.2:
+            if node_stats_complete and dead >= 1000 and dead_ratio >= 0.2:
                 findings.append({
                     'check': 'dead_tuple_ratio', 'severity': 'medium',
                     'observed': f"{table['schemaname']}.{table['tablename']} estimated dead tuple ratio is {dead_ratio:.1%}",
