@@ -65,7 +65,6 @@ class AIOpsAgent:
         else:
             final = first
         content = final.content or ''
-        fallback = False
         if first.tool_calls and not refs:
             try:
                 result = await execute_search_knowledge('pg_locks 未授予锁 事务等待 只读排查', top_k=5)
@@ -89,12 +88,13 @@ class AIOpsAgent:
                 return self._fallback_diagnosis(
                     context, type(error).__name__, refs, bool(first.tool_calls)
                 )
-        if not content.strip() or 'DSML' in content:
-            content = '模型返回了无法解析的工具调用格式，本次没有可靠的 AI 诊断文本。请根据采集到的锁证据进行人工只读核查。'
-            fallback = True
         structured = self._parse_report(content)
+        if structured.get('parse_error'):
+            return self._fallback_diagnosis(
+                context, 'InvalidDiagnosticReport', refs, bool(first.tool_calls)
+            )
         return {'analysis': content, 'structured': structured, 'knowledge_refs': refs,
-                'tool_called': bool(first.tool_calls), 'analysis_fallback': fallback}
+                'tool_called': bool(first.tool_calls), 'analysis_fallback': False}
 
     @staticmethod
     def _parse_report(content):
@@ -104,7 +104,16 @@ class AIOpsAgent:
                 content = fenced.group(1)
         try:
             value = json.loads(content)
-            if isinstance(value, dict):
+            if (
+                isinstance(value, dict)
+                and isinstance(value.get('root_cause'), str)
+                and value['root_cause'].strip()
+                and isinstance(value.get('risk_level'), str)
+                and value['risk_level'].strip()
+                and isinstance(value.get('evidence'), list)
+                and isinstance(value.get('recommendations'), list)
+                and all(isinstance(item, str) for item in value['recommendations'])
+            ):
                 return value
         except (TypeError, json.JSONDecodeError):
             pass
