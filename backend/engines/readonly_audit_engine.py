@@ -16,9 +16,16 @@ class ReadonlyAuditEngine:
 
     async def run_lock_audit(self):
         locks = await execute_get_database_locks(True)
-        analysis = await self._diagnose(
-            f"发现 {locks['blocked_locks']} 个阻塞锁，请分析原因并给出只读建议", locks
-        )
+        if locks['collection_status'] == 'error':
+            analysis = {
+                'analysis': '锁状态采集失败，请检查协调节点连接后重试。',
+                'knowledge_refs': [],
+                'tool_called': False,
+            }
+        else:
+            analysis = await self._diagnose(
+                f"发现 {locks['blocked_locks']} 个阻塞锁，请分析原因并给出只读建议", locks
+            )
         structured = analysis.get('structured') or {}
         risk_level = structured.get('risk_level')
         if isinstance(risk_level, str):
@@ -29,7 +36,9 @@ class ReadonlyAuditEngine:
                 'critical': 'critical', 'high': 'high',
                 'medium': 'medium', 'low': 'low',
             }.get(risk_level, risk_level)
-        if risk_level not in {'low', 'medium', 'high', 'critical'}:
+        if locks['collection_status'] == 'error':
+            risk_level = 'unknown'
+        elif risk_level not in {'low', 'medium', 'high', 'critical'}:
             risk_level = 'medium' if locks['blocked_locks'] else 'low'
         audit_id = str(uuid.uuid4())
         kb = PgVectorKnowledgeBase()
