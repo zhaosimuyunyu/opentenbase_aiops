@@ -401,6 +401,24 @@ elif page == "🧾 修复审批":
         for item in items:
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 st.json({"parameters": item.get("parameters"), "evidence": item.get("evidence"), "reason": item.get("reason")})
+                audit_id = item.get("audit_id")
+                if audit_id and st.checkbox("查看原始巡检", key=f"source-audit-{item['request_id']}"):
+                    st.caption(f"审计 ID {audit_id}")
+                    source = requests.get(f"{api_base}/api/audits/{audit_id}", timeout=10)
+                    if source.status_code == 404:
+                        st.info("原始巡检记录已无法读取。")
+                    elif source.ok:
+                        audit = source.json()
+                        evidence = audit.get("evidence") or {}
+                        render_collection_status(evidence)
+                        st.json({
+                            "风险等级": audit.get("risk_level"),
+                            "发现": evidence.get("findings") or [],
+                            "AI 分析": audit.get("ai_analysis"),
+                            "知识引用": audit.get("knowledge_refs") or [],
+                        })
+                    else:
+                        st.error(f"读取原始巡检失败（HTTP {source.status_code}）")
                 if item.get("approved_at"):
                     st.write("审核记录", item["approved_at"], item.get("approved_by"))
                 if item["status"] == "executing":
