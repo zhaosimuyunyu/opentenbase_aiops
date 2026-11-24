@@ -108,6 +108,23 @@ with st.sidebar:
     st.markdown("---")
     st.caption("OpenTenBase AIOps v0.1.0")
 
+def render_analysis_status(analysis):
+    if not isinstance(analysis, dict):
+        return
+    source = (analysis.get("structured") or {}).get("analysis_source")
+    if source == "collection_failure":
+        st.info("采集失败，未运行模型诊断")
+    elif analysis.get("analysis_fallback"):
+        details = []
+        if analysis.get("ai_http_status"):
+            details.append(f"HTTP {analysis['ai_http_status']}")
+        if analysis.get("ai_error"):
+            details.append(analysis["ai_error"])
+        suffix = f"（{' · '.join(details)}）" if details else ""
+        message = "模型诊断失败，已使用巡检规则" if source == "deterministic_evidence_rules" else "模型诊断未生成可用报告"
+        st.warning(message + suffix)
+
+
 def render_collection_status(evidence):
     errors = evidence.get("collection_errors") or {}
     status = evidence.get("collection_status")
@@ -322,6 +339,7 @@ elif page == "🛡️ 只读巡检":
     if audit:
         st.metric("风险等级", audit["risk_level"])
         render_collection_status(audit.get("evidence") or {})
+        render_analysis_status(audit)
         st.caption(f"审计 ID: {audit['audit_id']}")
         findings = audit.get("findings", [])
         if findings:
@@ -375,6 +393,7 @@ elif page == "📜 巡检历史":
                 evidence = detail.get("evidence") or {}
                 render_collection_status(evidence)
                 render_repair_proposal(api_base, selected_id, evidence.get("findings", []))
+                render_analysis_status(detail.get("ai_analysis"))
                 st.json(detail.get("ai_analysis", {}))
                 with st.expander("查看现场证据"):
                     st.json(detail.get("evidence", {}))
@@ -417,6 +436,7 @@ elif page == "🧾 修复审批":
                         audit = source.json()
                         evidence = audit.get("evidence") or {}
                         render_collection_status(evidence)
+                        render_analysis_status(audit.get("ai_analysis"))
                         st.json({
                             "风险等级": audit.get("risk_level"),
                             "发现": evidence.get("findings") or [],
