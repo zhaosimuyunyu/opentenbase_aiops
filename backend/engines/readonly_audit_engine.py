@@ -38,8 +38,10 @@ class ReadonlyAuditEngine:
             }.get(risk_level, risk_level)
         if locks['collection_status'] == 'error':
             risk_level = 'unknown'
-        elif risk_level not in {'low', 'medium', 'high', 'critical'}:
-            risk_level = 'medium' if locks['blocked_locks'] else 'low'
+        elif not isinstance(risk_level, str) or risk_level not in {'low', 'medium', 'high', 'critical'}:
+            risk_level = 'high' if locks['blocked_locks'] else 'low'
+        elif locks['blocked_locks'] and risk_level in {'low', 'medium'}:
+            risk_level = 'high'
         audit_id = str(uuid.uuid4())
         kb = PgVectorKnowledgeBase()
         try:
@@ -275,7 +277,7 @@ class ReadonlyAuditEngine:
                     'critical': 'critical', 'high': 'high',
                     'medium': 'medium', 'low': 'low',
                 }.get(risk_level, risk_level)
-            if risk_level not in {'low', 'medium', 'high', 'critical'}:
+            if not isinstance(risk_level, str) or risk_level not in {'low', 'medium', 'high', 'critical'}:
                 reliable_findings = [item for item in findings if item['severity'] != 'unknown']
                 risk_level = 'high' if any(
                     item['severity'] == 'high' for item in reliable_findings
