@@ -69,6 +69,8 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       - AIOPS_APPROVAL_TOKEN=${AIOPS_APPROVAL_TOKEN:-}
+      - AIOPS_AUTO_AUDIT_ENABLED=${AIOPS_AUTO_AUDIT_ENABLED:-false}
+      - AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=${AIOPS_AUTO_AUDIT_INTERVAL_SECONDS:-900}
       - DB_HOST=${DB_HOST:-otb-node1}
       - DB_PORT=${DB_PORT:-11003}
       - DB_USER=${DB_USER:-opentenbase}

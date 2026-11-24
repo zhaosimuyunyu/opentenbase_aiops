@@ -1,7 +1,6 @@
 """OpenTenBase AIOps - Main Streamlit Application"""
 import streamlit as st
 import sys
-import asyncio
 import os
 import requests
 from pathlib import Path
@@ -16,7 +15,6 @@ from backend.utils.logger import setup_logger
 from backend.collectors.cluster import ClusterCollector
 from backend.collectors.performance import PerformanceCollector
 from backend.ai.llm_client import DeepSeekClient
-from backend.engines.readonly_audit_engine import ReadonlyAuditEngine
 
 logger = setup_logger(__name__)
 
@@ -221,11 +219,22 @@ if page == "📊 健康监控":
 elif page == "🛡️ 只读巡检":
     st.markdown('<div class="main-header">🛡️ AI 只读健康巡检</div>', unsafe_allow_html=True)
     st.caption("只采集数据库状态并生成诊断，不执行终止会话、修改参数或其他写操作。")
+    api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
+    try:
+        automation = requests.get(f"{api_base}/api/automation/status", timeout=10).json()
+        mode = "已启用" if automation["automatic_health_audit_enabled"] else "已关闭"
+        st.caption(f"周期巡检{mode} · 间隔 {automation['interval_seconds']} 秒")
+    except Exception as error:
+        st.warning(f"读取周期巡检状态失败: {error}")
     if st.button("运行只读巡检", type="primary"):
         with st.spinner("正在采集 OpenTenBase 状态并分析..."):
             try:
-                audit = asyncio.run(ReadonlyAuditEngine().run_health_audit())
-                st.session_state.last_health_audit = audit
+                response = requests.post(f"{api_base}/api/audits/health", timeout=90)
+                if response.status_code == 409:
+                    st.info("已有巡检正在运行")
+                else:
+                    response.raise_for_status()
+                    st.session_state.last_health_audit = response.json()
             except Exception as error:
                 st.error(f"巡检失败: {error}")
     audit = st.session_state.get("last_health_audit")

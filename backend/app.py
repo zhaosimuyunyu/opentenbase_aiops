@@ -1,4 +1,7 @@
 """FastAPI application (optional REST API)"""
+import asyncio
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -14,15 +17,32 @@ from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .ai.knowledge_base_pgvector import PgVectorKnowledgeBase
 from psycopg2.extras import RealDictCursor
 from .engines.repair_workflow import RepairWorkflow
+from .engines.health_audit_scheduler import HealthAuditScheduler
 
 logger = setup_logger(__name__)
 config = Config()
+health_audit_scheduler = HealthAuditScheduler(config)
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    scheduler_task = None
+    if config.AIOPS_AUTO_AUDIT_ENABLED:
+        scheduler_task = asyncio.create_task(health_audit_scheduler.run_forever())
+    try:
+        yield
+    finally:
+        if scheduler_task:
+            scheduler_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await scheduler_task
 
 # Initialize FastAPI app
 app = FastAPI(
     title="OpenTenBase AIOps API",
     description="AI-powered operations platform for OpenTenBase",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -193,10 +213,41 @@ async def run_readonly_lock_audit():
 async def run_readonly_health_audit():
     """Run and persist the read-only health audit."""
     try:
-        return await ReadonlyAuditEngine().run_health_audit()
+        result = await health_audit_scheduler.run_once()
+        if result is None:
+            raise HTTPException(status_code=409, detail="Another health audit is already running")
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Read-only health audit failed")
         raise HTTPException(status_code=503, detail="Read-only health audit failed") from e
+
+
+@app.get("/api/automation/status")
+async def get_automation_status():
+    kb = PgVectorKnowledgeBase()
+    try:
+        with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT to_regclass('public.audit_records') AS audit_table")
+            audit_table_exists = cursor.fetchone()["audit_table"] is not None
+            latest = None
+            if audit_table_exists:
+                cursor.execute(
+                    "SELECT audit_id,created_at,risk_level FROM audit_records "
+                    "WHERE audit_type='readonly_health_audit' ORDER BY created_at DESC LIMIT 1"
+                )
+                latest = cursor.fetchone()
+        return {
+            "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
+            "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
+            "latest_audit": dict(latest) if latest else None,
+        }
+    except Exception as error:
+        logger.exception("Failed to read automation status")
+        raise HTTPException(status_code=503, detail="Automation status is unavailable") from error
+    finally:
+        kb.close()
 
 
 @app.get("/api/audits")

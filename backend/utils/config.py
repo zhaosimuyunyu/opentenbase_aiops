@@ -32,6 +32,13 @@ class Config:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     AIOPS_APPROVAL_TOKEN: str = os.getenv("AIOPS_APPROVAL_TOKEN", "")
     AIOPS_APPROVER_ID: str = os.getenv("AIOPS_APPROVER_ID", "local-operator")
+    AIOPS_AUTO_AUDIT_ENABLED: bool = (
+        os.getenv("AIOPS_AUTO_AUDIT_ENABLED", "false").lower()
+        in {"1", "true", "yes", "on"}
+    )
+    AIOPS_AUTO_AUDIT_INTERVAL_SECONDS: int = max(
+        60, int(os.getenv("AIOPS_AUTO_AUDIT_INTERVAL_SECONDS", "900"))
+    )
 
     # Vector Store
     CHROMA_PERSIST_DIRECTORY: str = os.getenv(

@@ -9,6 +9,7 @@
 ## ✨ 功能特性
 
 - 🤖 **智能问答助手** - 基于 DeepSeek 大模型的数据库问题诊断
+- 🔁 **周期健康巡检** - 可选定时采集、AI 分析并将审计结果持久化
 - 📊 **健康监控** - 实时集群状态监控和健康巡检
 - 🔍 **性能诊断** - 锁分析、慢查询检测、表统计
 - 🎯 **分布式特性** - 针对 OpenTenBase 分布式架构的专项诊断
@@ -119,6 +120,11 @@ opentenbase-aiops/
 | `DEEPSEEK_API_KEY` | DeepSeek API Key | **必填** |
 | `DEEPSEEK_API_BASE` | API 端点 | `https://api.deepseek.com/v1` |
 | `DEEPSEEK_MODEL` | 模型名称 | `deepseek-chat` |
+| `AIOPS_AUTO_AUDIT_ENABLED` | 是否启用周期健康巡检 | `false` |
+| `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` | 周期巡检间隔秒数，最小 60 秒 | `900` |
+| `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
+
+周期巡检默认关闭。配置启用后由 API 服务定期运行只读健康审计，结果写入巡检历史。多 API 实例通过知识库 PostgreSQL advisory lock 选出单一巡检者。手动巡检也经过 API 并使用同一把锁。
 
 ### OpenTenBase 连接
 

@@ -7,7 +7,7 @@ from ..tools.knowledge_search_tool import TOOL_SCHEMA, execute_search_knowledge
 class AIOpsAgent:
     def __init__(self, config=None):
         c = config or Config()
-        self.client = OpenAI(api_key=c.DEEPSEEK_API_KEY, base_url=c.DEEPSEEK_API_BASE, timeout=30.0)
+        self.client = OpenAI(api_key=c.DEEPSEEK_API_KEY, base_url=c.DEEPSEEK_API_BASE, timeout=20.0, max_retries=0)
         self.model = c.DEEPSEEK_MODEL
 
     async def diagnose(self, issue_description, context):
@@ -45,7 +45,10 @@ class AIOpsAgent:
                     result = await execute_search_knowledge(**json.loads(call.function.arguments))
                     refs.extend(result.get('results', []))
                     messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': json.dumps(result, ensure_ascii=False)})
-            final = self.client.chat.completions.create(model=self.model, messages=messages).choices[0].message
+            try:
+                final = self.client.chat.completions.create(model=self.model, messages=messages).choices[0].message
+            except (APITimeoutError, APIConnectionError) as error:
+                return self._fallback_diagnosis(context, type(error).__name__, refs, True)
         else:
             final = first
         content = final.content or ''
