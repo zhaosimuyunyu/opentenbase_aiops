@@ -4,6 +4,8 @@ from openai import OpenAI, APIConnectionError, APIStatusError
 from ..utils.config import Config
 from ..tools.knowledge_search_tool import TOOL_SCHEMA, execute_search_knowledge
 
+MAX_KNOWLEDGE_TOOL_CALLS = 3
+
 
 def _model_evidence(value):
     if isinstance(value, dict):
@@ -45,9 +47,12 @@ class AIOpsAgent:
         refs = []
         tool_errors = []
         if first.tool_calls:
+            selected_calls = first.tool_calls[:MAX_KNOWLEDGE_TOOL_CALLS]
+            if len(first.tool_calls) > len(selected_calls):
+                tool_errors.append('KnowledgeToolCallLimit')
             assistant_message = {'role': 'assistant', 'content': first.content or ''}
             tool_calls = []
-            for call in first.tool_calls:
+            for call in selected_calls:
                 tool_calls.append({
                     'id': call.id,
                     'type': 'function',
@@ -58,7 +63,7 @@ class AIOpsAgent:
                 })
             assistant_message['tool_calls'] = tool_calls
             messages.append(assistant_message)
-            for call in first.tool_calls:
+            for call in selected_calls:
                 try:
                     if call.function.name != 'search_knowledge':
                         raise ValueError('Unknown diagnostic tool')
