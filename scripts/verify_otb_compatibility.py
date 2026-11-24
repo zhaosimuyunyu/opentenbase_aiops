@@ -19,7 +19,8 @@ PROBES = {
     "connection_identity": "SELECT version(), current_database(), current_user",
     "database_identity": CHECKS["database_identity"],
     "cluster_nodes": "SELECT node_name, node_type, node_host, node_port FROM pgxc_node ORDER BY node_type, node_name",
-    "activity": "SELECT datname, state, count(*) AS connection_count FROM pg_stat_activity GROUP BY datname, state",
+    "activity": CHECKS["connections"],
+    "max_connections": CHECKS["max_connections"],
     "locks": """SELECT l.locktype, l.mode, l.granted, l.pid,
                l.transactionid::text AS transactionid,
                CASE WHEN NOT l.granted THEN pg_blocking_pids(l.pid) ELSE ARRAY[]::int[] END AS blocker_pids
