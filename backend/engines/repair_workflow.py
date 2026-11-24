@@ -156,6 +156,9 @@ class RepairWorkflow:
                     previous_by_node = {
                         item["node_name"]: item["last_analyze"] for item in stats["nodes"]
                     }
+                    audited_nodes = {item["node_name"] for item in expected.get("nodes", [])}
+                    if not audited_nodes or audited_nodes != previous_by_node.keys():
+                        raise ValueError("Data-node coverage changed; rerun the health audit")
                     with conn.cursor() as target:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
@@ -175,7 +178,10 @@ class RepairWorkflow:
                         if node_name in current_by_node and current_by_node[node_name]
                         and (previous is None or current_by_node[node_name] > previous)
                     ]
-                    advanced = bool(previous_by_node) and len(advanced_nodes) == len(previous_by_node)
+                    advanced = (
+                        current_by_node.keys() == previous_by_node.keys()
+                        and len(advanced_nodes) == len(previous_by_node)
+                    )
                     result = {
                         "success": advanced,
                         "operation": operation,

@@ -357,7 +357,10 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
             record = cursor.fetchone()
         if not record:
             raise HTTPException(status_code=404, detail="Audit not found")
-        findings = (record["evidence"] or {}).get("findings", [])
+        audit_evidence = record["evidence"] or {}
+        if any(name.startswith("data_node_stats:") for name in audit_evidence.get("collection_errors", {})):
+            raise HTTPException(status_code=400, detail="Data-node statistics are incomplete; rerun the health audit")
+        findings = audit_evidence.get("findings", [])
         finding = findings[request.finding_index] if request.finding_index < len(findings) else {}
         if finding.get("check") != "stale_table_statistics":
             raise HTTPException(status_code=400, detail="Selected audit finding is not eligible for ANALYZE")

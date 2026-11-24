@@ -145,11 +145,14 @@ class ReadonlyAuditEngine:
                     'observed': f"Replication replay lag is {lag_seconds:.1f} seconds",
                     'evidence': row,
                 })
+        node_stats_complete = not any(
+            name.startswith('data_node_stats:') for name in snapshot['errors']
+        )
         table_stats = checks.get('data_node_table_stats') or []
         for table in table_stats:
             live = table.get('live_tuples') or 0
             modifications = table.get('modifications_since_analyze') or 0
-            if modifications >= 1000 and modifications >= live * 0.2:
+            if node_stats_complete and modifications >= 1000 and modifications >= live * 0.2:
                 findings.append({
                     'check': 'stale_table_statistics', 'severity': 'medium',
                     'observed': f"{table['schemaname']}.{table['tablename']} has {modifications} modifications since analysis",
