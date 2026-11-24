@@ -473,6 +473,7 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
         return RepairWorkflow().create_request(
             "analyze_table", {"table": table},
             {
+                "proposal_source": "stale_table_statistics",
                 "observation": evidence,
                 "ai_analysis": record["ai_analysis"],
                 "knowledge_refs": record["knowledge_refs"] if isinstance(record["knowledge_refs"], list) else [],

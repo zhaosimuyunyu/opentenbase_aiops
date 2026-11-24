@@ -108,6 +108,7 @@ class AIOpsAgent:
             return {**self._fallback_diagnosis(
                 context, 'InvalidDiagnosticReport', refs, bool(first.tool_calls)
             ), 'tool_errors': tool_errors}
+        structured['analysis_source'] = 'model'
         return {'analysis': content, 'structured': structured, 'knowledge_refs': refs,
                 'tool_called': bool(first.tool_calls), 'analysis_fallback': False,
                 'tool_errors': tool_errors}

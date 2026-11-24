@@ -126,6 +126,8 @@ def render_analysis_status(analysis):
     source = (analysis.get("structured") or {}).get("analysis_source")
     if source == "collection_failure":
         st.info("采集失败，未运行模型诊断")
+    elif source == "model":
+        st.caption("诊断来源 · 模型")
     elif analysis.get("analysis_fallback"):
         details = []
         if analysis.get("ai_http_status"):
@@ -447,6 +449,8 @@ elif page == "🧾 修复审批":
         for item in items:
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 proposal_evidence = item.get("evidence") or {}
+                if proposal_evidence.get("proposal_source") == "stale_table_statistics":
+                    st.caption("提案来源 · 表统计过时巡检规则")
                 render_analysis_status(proposal_evidence.get("ai_analysis"))
                 st.json({"parameters": item.get("parameters"), "evidence": proposal_evidence, "reason": item.get("reason")})
                 audit_id = item.get("audit_id")
