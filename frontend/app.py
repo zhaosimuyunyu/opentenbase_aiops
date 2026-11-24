@@ -126,7 +126,11 @@ def render_repair_proposal(api_base, audit_id, findings):
                 json={"finding_index": selected_finding, "reason": repair_reason}, timeout=15,
             )
             if response.ok:
-                st.success(f"待审批请求已创建: {response.json()['request_id']}")
+                proposal = response.json()
+                if proposal.get("reused"):
+                    st.info(f"已有提案 {proposal['request_id']} · {proposal['status']}")
+                else:
+                    st.success(f"待审批请求已创建: {proposal['request_id']}")
             else:
                 st.error(response.text)
 

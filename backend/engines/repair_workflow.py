@@ -96,6 +96,22 @@ class RepairWorkflow:
             self._ensure_schema(kb)
             with kb.conn, kb.conn.cursor() as cur:
                 cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext('aiops_repair_proposal'), hashtext(%s))",
+                    (audit_id,),
+                )
+                cur.execute(
+                    "SELECT request_id,status,parameters FROM repair_requests "
+                    "WHERE audit_id=%s AND operation=%s AND parameters->>'table'=%s "
+                    "ORDER BY created_at DESC,request_id DESC LIMIT 1",
+                    (audit_id, operation, params["table"]),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    return {
+                        "request_id": existing[0], "status": existing[1],
+                        "operation": operation, "parameters": existing[2], "reused": True,
+                    }
+                cur.execute(
                     "INSERT INTO repair_requests(request_id,operation,parameters,evidence,reason,audit_id,finding) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                     (request_id, operation, Json(params), Json(evidence or {}), reason,
                      audit_id, Json(finding) if finding else None),
