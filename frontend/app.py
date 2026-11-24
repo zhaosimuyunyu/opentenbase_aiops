@@ -327,12 +327,17 @@ elif page == "🛡️ 只读巡检":
         with st.spinner("正在采集 OpenTenBase 状态并分析..."):
             try:
                 params = {"table": statistics_target} if statistics_target else None
-                response = requests.post(f"{api_base}/api/audits/health", params=params, timeout=90)
+                response = requests.post(
+                    f"{api_base}/api/audits/health", params=params,
+                    timeout=st.session_state.config.AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS,
+                )
                 if response.status_code == 409:
                     st.info("已有巡检正在运行")
                 else:
                     response.raise_for_status()
                     st.session_state.last_health_audit = response.json()
+            except requests.exceptions.Timeout:
+                st.warning("等待巡检响应超时，服务端可能仍在运行。请到巡检历史确认结果。")
             except Exception as error:
                 st.error(f"巡检失败: {error}")
     audit = st.session_state.get("last_health_audit")
