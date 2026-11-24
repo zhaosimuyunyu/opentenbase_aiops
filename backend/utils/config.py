@@ -26,6 +26,7 @@ class Config:
         "https://api.deepseek.com/v1"
     )
     DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    DEEPSEEK_TIMEOUT_SECONDS: float = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "45"))
 
     # Application
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")

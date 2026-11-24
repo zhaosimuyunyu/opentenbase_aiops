@@ -15,7 +15,10 @@ def _model_evidence(value):
 class AIOpsAgent:
     def __init__(self, config=None):
         c = config or Config()
-        self.client = OpenAI(api_key=c.DEEPSEEK_API_KEY, base_url=c.DEEPSEEK_API_BASE, timeout=20.0, max_retries=0)
+        self.client = OpenAI(
+            api_key=c.DEEPSEEK_API_KEY, base_url=c.DEEPSEEK_API_BASE,
+            timeout=c.DEEPSEEK_TIMEOUT_SECONDS, max_retries=0,
+        )
         self.model = c.DEEPSEEK_MODEL
 
     async def diagnose(self, issue_description, context):
