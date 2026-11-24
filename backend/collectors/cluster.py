@@ -2,6 +2,7 @@
 from typing import Dict, Any, List
 from .base import BaseCollector
 from ..utils.logger import setup_logger
+from .readonly_health import ReadonlyHealthCollector
 
 logger = setup_logger(__name__)
 
@@ -13,10 +14,19 @@ class ClusterCollector(BaseCollector):
         """Collect all cluster information"""
         self.errors = []
         try:
+            nodes = self.get_nodes()
+            node_connectivity = ReadonlyHealthCollector._probe_node_connectivity(nodes)
+            for node in node_connectivity:
+                if node['status'] == 'unreachable':
+                    self._record_error(
+                        f"node_connectivity:{node['node_name']}",
+                        ConnectionError(node['error'] or 'Node endpoint is unreachable'),
+                    )
             return self._create_result(
                 status='success',
                 data={
-                    'nodes': self.get_nodes(),
+                    'nodes': nodes,
+                    'node_connectivity': node_connectivity,
                     'connections': self.get_connections(),
                     'replication': self.get_replication_status(),
                     'database_info': self.get_database_info(),

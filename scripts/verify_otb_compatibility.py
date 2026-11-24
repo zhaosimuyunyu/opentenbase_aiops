@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Probe the OpenTenBase SQL surface used by AIOps without changing data."""
 import json
+import socket
 import sys
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def main() -> int:
         "target": {"host": config.DB_HOST, "port": config.DB_PORT, "database": config.DB_NAME, "user": config.DB_USER},
         "driver": "psycopg2",
         "probes": {},
+        "node_connectivity": [],
     }
     try:
         connection = psycopg2.connect(
@@ -58,6 +60,24 @@ def main() -> int:
                     rows = cursor.fetchall()
                 connection.rollback()
                 report["probes"][name] = {"status": "pass", "row_count": len(rows), "columns": list(rows[0]) if rows else []}
+                if name == "cluster_nodes":
+                    for node in rows:
+                        host, port = node.get("node_host"), node.get("node_port")
+                        result = {
+                            "node_name": node.get("node_name"),
+                            "node_type": node.get("node_type"),
+                            "host": host,
+                            "port": port,
+                            "status": "unknown",
+                        }
+                        if host and port:
+                            try:
+                                with socket.create_connection((host, int(port)), timeout=0.75):
+                                    result["status"] = "pass"
+                            except OSError as error:
+                                result["status"] = "fail"
+                                result["error"] = str(error)
+                        report["node_connectivity"].append(result)
             except Exception as error:
                 connection.rollback()
                 report["probes"][name] = {"status": "fail", "type": type(error).__name__, "message": str(error).strip()}
@@ -65,9 +85,18 @@ def main() -> int:
         connection.close()
 
     failed = [name for name, result in report["probes"].items() if result["status"] == "fail"]
-    report["summary"] = {"passed": len(report["probes"]) - len(failed), "failed": len(failed), "failed_probes": failed}
+    failed_nodes = [node["node_name"] for node in report["node_connectivity"] if node["status"] == "fail"]
+    unverified_nodes = [node["node_name"] for node in report["node_connectivity"] if node["status"] == "unknown"]
+    report["summary"] = {
+        "sql_probes_passed": len(report["probes"]) - len(failed),
+        "sql_probes_failed": len(failed),
+        "failed_probes": failed,
+        "unreachable_nodes": failed_nodes,
+        "unverified_nodes": unverified_nodes,
+        "status": "fail" if failed or failed_nodes or unverified_nodes else "pass",
+    }
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
-    return 0 if not failed else 2
+    return 0 if not failed and not failed_nodes and not unverified_nodes else 2
 
 
 if __name__ == "__main__":

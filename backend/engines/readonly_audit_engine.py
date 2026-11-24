@@ -53,7 +53,7 @@ class ReadonlyAuditEngine:
         checks = snapshot['checks']
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info',
-                    'prepared_transactions')}
+                    'prepared_transactions', 'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
                         'table_stats', 'index_usage')}
@@ -66,6 +66,13 @@ class ReadonlyAuditEngine:
                 'observed': f'{len(blocked_locks)} waiting locks',
                 'evidence': blocked_locks,
             })
+        for node in checks.get('node_connectivity') or []:
+            if node.get('status') == 'unreachable':
+                findings.append({
+                    'check': 'node_unreachable', 'severity': 'critical',
+                    'observed': f"{node.get('node_name')} ({node.get('node_type')}) is unreachable at {node.get('host')}:{node.get('port')}",
+                    'evidence': node,
+                })
         connection_rows = checks.get('connections')
         total_connections = sum(row['connection_count'] for row in connection_rows or [])
         max_rows = checks.get('max_connections') or []
@@ -173,8 +180,12 @@ class ReadonlyAuditEngine:
         }
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
         performance_errors = performance_checks.intersection(snapshot['errors'])
+        unreachable_nodes = any(
+            node.get('status') == 'unreachable'
+            for node in checks.get('node_connectivity', [])
+        )
         cluster_status = 'error' if len(cluster_errors) == len(cluster_checks) else (
-            'partial' if cluster_errors else 'success'
+            'partial' if cluster_errors or unreachable_nodes else 'success'
         )
         performance_status = 'error' if len(performance_errors) == len(performance_checks) else (
             'partial' if performance_errors else 'success'

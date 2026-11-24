@@ -1,5 +1,6 @@
 """Read-only OpenTenBase health checks with isolated query failures."""
 from datetime import datetime
+import socket
 
 from psycopg2.extras import RealDictCursor
 
@@ -114,6 +115,9 @@ class ReadonlyHealthCollector:
                         "type": type(error).__name__,
                         "message": str(error).strip(),
                     }
+            nodes = results.get("nodes", [])
+            if nodes:
+                results["node_connectivity"] = self._probe_node_connectivity(nodes)
         except Exception as error:
             errors["connection"] = {
                 "type": type(error).__name__,
@@ -127,3 +131,27 @@ class ReadonlyHealthCollector:
             "checks": results,
             "errors": errors,
         }
+
+    @staticmethod
+    def _probe_node_connectivity(nodes):
+        checks = []
+        for node in nodes:
+            host, port = node.get("node_host"), node.get("node_port")
+            status = "unknown"
+            error = None
+            if host and port:
+                try:
+                    with socket.create_connection((host, int(port)), timeout=0.75):
+                        status = "reachable"
+                except OSError as exception:
+                    status = "unreachable"
+                    error = str(exception)
+            checks.append({
+                "node_name": node.get("node_name"),
+                "node_type": node.get("node_type"),
+                "host": host,
+                "port": port,
+                "status": status,
+                "error": error,
+            })
+        return checks

@@ -126,8 +126,13 @@ if page == "📊 健康监控":
         collector = ClusterCollector(st.session_state.db_connector)
         result = collector.collect()
 
-    if result['status'] == 'success':
+    if result['status'] in {'success', 'partial'}:
         data = result['data']
+        if result['status'] == 'partial':
+            st.warning("集群状态仅部分可用，请检查下方节点连通性和采集错误。")
+            if result.get('errors'):
+                with st.expander("查看采集错误"):
+                    st.json(result['errors'])
 
         # Overview metrics
         st.markdown("### 总览")
@@ -165,6 +170,10 @@ if page == "📊 健康监控":
             st.dataframe(nodes, use_container_width=True, hide_index=True)
         else:
             st.info("暂无节点信息")
+        connectivity = data.get('node_connectivity', [])
+        if connectivity:
+            st.markdown("#### 节点网络连通性")
+            st.dataframe(connectivity, use_container_width=True, hide_index=True)
 
         # Connection details
         st.markdown("### 连接详情")
