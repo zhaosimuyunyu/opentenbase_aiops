@@ -126,6 +126,8 @@ opentenbase-aiops/
 
 ### Prometheus 告警
 
+仓库中的 `monitoring/prometheus.yml` 可用于同一 Docker 网络中的独立 Prometheus 实例。将它和 `aiops-alerts.yml` 放在实例的同一配置目录。
+
 将 AIOps API 的 `/metrics` 加入现有 Prometheus，抓取任务名设为 `opentenbase-aiops`。
 在同一 Docker 网络中使用 `aiops-api:8000`，在宿主机运行 Prometheus 时使用 `127.0.0.1:8000`。
 通过 Prometheus 的 `rule_files` 加载仓库中的 `monitoring/aiops-alerts.yml`，并用现有 Alertmanager 路由投递告警。
