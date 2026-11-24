@@ -18,6 +18,11 @@ def _collection_error(error):
 
 
 CHECKS = {
+    "database_identity": """
+        SELECT system_identifier::text AS system_identifier,
+               current_database() AS database
+        FROM pg_catalog.pg_control_system()
+    """,
     "nodes": """
         SELECT node_name, node_type, node_host, node_port,
                nodeis_primary, nodeis_preferred

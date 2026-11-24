@@ -67,7 +67,7 @@ class ReadonlyAuditEngine:
         snapshot = ReadonlyHealthCollector(Config()).collect(table=table)
         checks = snapshot['checks']
         cluster = {name: checks.get(name) for name in
-                   ('nodes', 'connections', 'replication', 'database_info',
+                   ('nodes', 'connections', 'replication', 'database_info', 'database_identity',
                     'prepared_transactions', 'data_node_prepared_transactions',
                     'node_connectivity')}
         performance = {name: checks.get(name) for name in
@@ -169,6 +169,8 @@ class ReadonlyAuditEngine:
         node_stats_complete = not any(
             name.startswith('data_node_stats:') for name in snapshot['errors']
         )
+        identities = checks.get('database_identity') or []
+        identity = identities[0] if identities else None
         table_stats = checks.get('data_node_table_stats') or []
         for table in table_stats:
             live = table.get('live_tuples') or 0
@@ -181,6 +183,7 @@ class ReadonlyAuditEngine:
                         'schema': table['schemaname'], 'table': table['tablename'],
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
                         'nodes': table.get('nodes', []),
+                        'database_identity': identity,
                     },
                 })
             dead = table.get('dead_tuples') or 0
@@ -205,7 +208,7 @@ class ReadonlyAuditEngine:
             })
         cluster_checks = {
             'nodes', 'connections', 'max_connections', 'replication',
-            'database_info', 'prepared_transactions',
+            'database_info', 'database_identity', 'prepared_transactions',
         }
         performance_checks = {
             'locks', 'long_running_queries', 'idle_transactions',

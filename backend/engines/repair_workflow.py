@@ -165,6 +165,16 @@ class RepairWorkflow:
                     with conn.cursor() as target:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
+                        target.execute(
+                            "SELECT system_identifier::text, current_database() "
+                            "FROM pg_catalog.pg_control_system()"
+                        )
+                        identity = target.fetchone()
+                        audited_identity = expected.get("database_identity") or {}
+                        if identity is None or identity != (
+                            audited_identity.get("system_identifier"), audited_identity.get("database")
+                        ):
+                            raise ValueError("Audited database identity changed or is missing; rerun the health audit")
                         schema_name, table_name = (
                             table.split(".", 1) if "." in table else ("public", table)
                         )
