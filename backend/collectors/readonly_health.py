@@ -9,6 +9,14 @@ from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
 
 
+def _collection_error(error):
+    return {
+        "type": type(error).__name__,
+        "message": str(error).strip(),
+        "sqlstate": getattr(error, "pgcode", None),
+    }
+
+
 CHECKS = {
     "nodes": """
         SELECT node_name, node_type, node_host, node_port,
@@ -112,10 +120,7 @@ class ReadonlyHealthCollector:
                     connection.rollback()
                 except Exception as error:
                     connection.rollback()
-                    errors[name] = {
-                        "type": type(error).__name__,
-                        "message": str(error).strip(),
-                    }
+                    errors[name] = _collection_error(error)
             nodes = results.get("nodes", [])
             if nodes:
                 results["node_connectivity"] = self._probe_node_connectivity(nodes)
@@ -130,10 +135,7 @@ class ReadonlyHealthCollector:
                 results["data_node_prepared_transactions"] = prepared
                 errors.update(prepared_errors)
         except Exception as error:
-            errors["connection"] = {
-                "type": type(error).__name__,
-                "message": str(error).strip(),
-            }
+            errors["connection"] = _collection_error(error)
         finally:
             connector.close()
         return {
@@ -216,10 +218,7 @@ class ReadonlyHealthCollector:
                 connection.rollback()
             except Exception as error:
                 connection.rollback()
-                errors[f"data_node_stats:{name}"] = {
-                    "type": type(error).__name__,
-                    "message": str(error).strip(),
-                }
+                errors[f"data_node_stats:{name}"] = _collection_error(error)
 
         by_table = {}
         for row in node_stats:
@@ -269,8 +268,5 @@ class ReadonlyHealthCollector:
                 connection.rollback()
             except Exception as error:
                 connection.rollback()
-                errors[f"data_node_prepared_transactions:{name}"] = {
-                    "type": type(error).__name__,
-                    "message": str(error).strip(),
-                }
+                errors[f"data_node_prepared_transactions:{name}"] = _collection_error(error)
         return transactions, errors
