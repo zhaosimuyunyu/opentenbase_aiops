@@ -39,6 +39,10 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+同版本隔离拓扑上，在创建复制表并写入测试行的事务内，通过会话级 `SET xc_maintenance_mode=on` 使隐式两阶段提交在 `TWO_PHASE_COMMIT_END` 中断。重启隔离拓扑后，官方 `pg_clean_check_txn(10)` 所见状态为全局 `TXN_STATUS_COMMITTED`、CN `PREPARED`、DN `COMMITTED`。随后调用 `pg_clean_execute(10)` 返回 `COMMIT / success`。分别回查 CN 和 DN 的 `pg_prepared_xacts` 均为空，经 CN 及直达 DN 的查询均返回测试行 `42`。测试表及节点组已清理，隔离实例已停止。
+
+上述提交验收覆盖至少一个参与节点已提交的故障状态。现场故障中两个 DN 的提交均报错，协调器另有持久化提交时间戳，仍需验证所有节点保持预备时官方工具如何使用该时间戳。隔离实验期间未更改现场事务。
+
 在隔离 CN、DN 和 GTM 上，对复制表写入后创建显式预备事务。官方诊断报告 CN 和 DN 均为 `TXN_STATUS_PREPARED`，全局状态为 `TXN_STATUS_ABORTED`。恢复函数在此构建中要求事务至少达到 10 秒，达到阈值后执行 `pg_clean_execute(10)` 返回 `ABORT / success`。分别在 CN 和 DN 查询 `pg_prepared_xacts`，测试 GID 均已消失，测试表的行数为 0。测试表和节点组已清理，隔离进程已停止。本次验证覆盖回滚路径，现场带持久化提交时间戳的事务需要单独验证提交恢复路径。
 
 带事务的隔离验收使用显式 `PREPARE TRANSACTION` 创建测试 GID。立即调用 `pg_clean_check_txn(120)` 返回空结果。等待 5 秒后改用 `pg_clean_check_txn(3)`，诊断返回该 GID 和 `TXN_STATUS_COMMITTED`，同时报告缺少全局追踪 ID。诊断后，该 GID 仍在 `pg_prepared_xacts` 中，随后使用 `ROLLBACK PREPARED` 清理测试事务。此结果验证了诊断能够发现达到检查年龄的预备事务。恢复验收须逐节点确认实际事务状态。这笔测试事务也未复现现场的跨节点提交故障。
