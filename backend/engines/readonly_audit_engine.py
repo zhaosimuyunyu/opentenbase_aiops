@@ -12,6 +12,10 @@ from ..collectors.readonly_health import ReadonlyHealthCollector
 logger = logging.getLogger(__name__)
 
 def _ensure_audit_schema(cursor):
+    cursor.execute("SELECT to_regclass('public.audit_records')")
+    if cursor.fetchone()[0] is not None:
+        return
+    cursor.execute("SELECT pg_advisory_xact_lock(hashtext('aiops.audit_records.schema'))")
     cursor.execute("""CREATE TABLE IF NOT EXISTS audit_records(
         audit_id text primary key, audit_type text not null,
         created_at timestamptz default now(), evidence jsonb not null,
