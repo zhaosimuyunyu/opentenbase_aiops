@@ -36,6 +36,16 @@ class RepairWorkflow:
 
     def _ensure_schema(self, kb):
         with kb.conn, kb.conn.cursor() as cur:
+            cur.execute("""
+                SELECT count(*) FROM pg_catalog.pg_attribute
+                WHERE attrelid = to_regclass('repair_requests')
+                  AND attname IN ('audit_id', 'finding', 'manual_review')
+                  AND NOT attisdropped
+            """)
+            columns = cur.fetchone()
+            if columns and columns[0] == 3:
+                return
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('aiops.repair_requests.schema'))")
             cur.execute("""CREATE TABLE IF NOT EXISTS repair_requests(
                 request_id text primary key, operation text not null, parameters jsonb not null,
                 evidence jsonb not null, reason text not null, status text not null default 'pending',
