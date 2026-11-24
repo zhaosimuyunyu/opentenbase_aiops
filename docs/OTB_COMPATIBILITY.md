@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+隔离拓扑复测时，临时 DN 曾在日志中报告已开始监听，随后 CN 连接被拒绝。Docker Linux 内核日志记录了 `otb-node1` 所属 cgroup 内两次全局 OOM，均杀死了 `postgres` 进程。容器未设置独立内存上限，检查时 Docker Linux 环境的 2 GiB swap 已接近耗尽。内核日志使用宿主 PID，尚未将两次事件逐一映射到临时 DN 的容器 PID。下次隔离恢复验收需为拓扑预留独立内存预算，并在启动 CN 前持续检查 DN 连通性。
+
 构建 `b612d77cb` 对应的 `pg_clean--1.0.sql` 明确将诊断、事务提交与回滚、记录清理等函数授予 `PUBLIC`。安装验收应检查普通角色的有效执行权限，并限制恢复入口的授权。已有后台清理器启用的实例还需单独验证注册扩展后是否会立即处理存量预备事务。当前仅核对了安装脚本，尚未实测扩展权限或安装时的后台行为。
 
 同版本源码显示，`pg_clean` 通过各节点上的 `public.pgxc_get_2pc_file`、`public.pgxc_get_record_list` 等 SQL 辅助函数读取事务记录。已从 `lab` 的 CN 和两个 DN 分别查询 `pg_proc`，均未找到诊断入口或这些辅助函数。动态库加载已通过，运行集群级诊断还需要验证各参与节点上的扩展 SQL 定义。
