@@ -128,6 +128,13 @@ class RepairWorkflow:
                     expected_table = f"{expected['schema']}.{expected['table']}"
                     if table != expected_table:
                         raise ValueError("Repair target does not match the audited finding")
+                cur.execute(
+                    "UPDATE repair_requests SET status='executing',approved_at=now(),approved_by=%s "
+                    "WHERE request_id=%s",
+                    (approver, request_id),
+                )
+                # Persist the claim before issuing SQL on the separate OpenTenBase connection.
+                kb.conn.commit()
                 db = OpenTenBaseConnector(self.config)
                 execution_attempted = False
                 try:
@@ -201,8 +208,9 @@ class RepairWorkflow:
                     "unverified" if execution_attempted else "failed"
                 )
                 cur.execute(
-                    "UPDATE repair_requests SET status=%s,approved_at=now(),approved_by=%s,result=%s WHERE request_id=%s",
-                    (status, approver, Json(result), request_id),
+                    "UPDATE repair_requests SET status=%s,result=%s "
+                    "WHERE request_id=%s AND status='executing'",
+                    (status, Json(result), request_id),
                 )
                 return {"request_id": request_id, "status": status, "result": result}
         finally:
