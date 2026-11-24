@@ -144,7 +144,8 @@ class ReadonlyHealthCollector:
                 results["data_node_table_stats"] = node_stats
                 errors.update(node_stats_errors)
                 if table is None and any(
-                    error.get("sqlstate") == "55P03" for error in node_stats_errors.values()
+                    error.get("sqlstate") == "55P03" or error.get("type") == "CollectionLimit"
+                    for error in node_stats_errors.values()
                 ):
                     fallback_stats = {}
                     for target in self.config.AIOPS_AUTO_AUDIT_TARGETS:
