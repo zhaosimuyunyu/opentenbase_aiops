@@ -211,6 +211,7 @@ class RepairWorkflow:
                     repair_config.DB_USER = repair_config.AIOPS_REPAIR_DB_USER
                     repair_config.DB_PASSWORD = repair_config.AIOPS_REPAIR_DB_PASSWORD
                 db = OpenTenBaseConnector(repair_config)
+                stats_db = OpenTenBaseConnector(self.config) if repair_config.AIOPS_REPAIR_DB_USER else db
                 execution_attempted = False
                 database_session_user = None
                 try:
@@ -240,8 +241,20 @@ class RepairWorkflow:
                                 relation
                             )
                         )
+                    stats_conn = stats_db.connect() if stats_db is not db else conn
+                    if stats_db is not db:
+                        stats_conn.set_session(readonly=True, autocommit=False)
+                        with stats_conn.cursor() as reader:
+                            reader.execute("SET LOCAL statement_timeout = '2500ms'")
+                            reader.execute(
+                                "SELECT system_identifier::text, current_database() "
+                                "FROM pg_catalog.pg_control_system()"
+                            )
+                            if reader.fetchone() != identity[:2]:
+                                raise ValueError("Statistics connection does not match the repair database")
+                        stats_conn.rollback()
                     stats = self._read_data_node_stats(
-                        conn, schema_name, table_name, keep_transaction=True
+                        stats_conn, schema_name, table_name, keep_transaction=stats_db is db
                     )
                     live_tuples = stats["live_tuples"]
                     modifications = stats["modifications_since_analyze"]
@@ -270,7 +283,7 @@ class RepairWorkflow:
                     for delay in (0, 0.5, 1, 2):
                         if delay:
                             sleep(delay)
-                        post_stats = self._read_data_node_stats(conn, schema_name, table_name)
+                        post_stats = self._read_data_node_stats(stats_conn, schema_name, table_name)
                         current_by_node = {
                             item["node_name"]: item["last_analyze"] for item in post_stats["nodes"]
                         }
@@ -327,6 +340,8 @@ class RepairWorkflow:
                         except Error as rollback_error:
                             result["rollback_error_type"] = type(rollback_error).__name__
                 finally:
+                    if stats_db is not db:
+                        stats_db.close()
                     db.close()
                 result["database_session_user"] = database_session_user
                 status = "executed" if result["success"] else (

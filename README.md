@@ -133,7 +133,7 @@ opentenbase-aiops/
 | `AIOPS_REPAIR_DB_USER` | 审批通过后连接同一 CN 和数据库的执行账号 | 空，沿用 `DB_USER` |
 | `AIOPS_REPAIR_DB_PASSWORD` | 独立执行账号的密码 | 空 |
 
-OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。当前巡检的逐 DN 采集以及修复的执行前校验和执行后复查都依赖该命令。配置独立账号可以分离凭据，普通表所有者仍无法完成当前版本的双 DN 修复验证。
+OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。配置独立执行账号后，由该账号获取表锁并执行 `ANALYZE`，巡检账号通过单独的只读连接完成执行前和执行后的逐 DN 统计检查。两条连接必须指向同一集群和数据库。
 
 ### Prometheus 告警
 
@@ -177,7 +177,7 @@ docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --ta
 docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --repair-account --table public.orders
 ```
 
-第三条命令使用配置的独立执行账号进行只读探测。它验证连接和逐 DN 统计读取权限，实际表锁与 `ANALYZE` 权限需要通过隔离表执行验收。
+第三条命令使用配置的独立执行账号进行只读探测。报告中的逐 DN 统计项仍尝试使用该账号执行 `EXECUTE DIRECT`，普通账号可能在这些项目返回 `42501`。巡检账号的逐 DN 权限通过前两条命令验证。执行账号的表锁可在隔离表上加 `--repair-lock` 验证，`ANALYZE` 权限需通过执行验收。
 
 使用报告中的 `summary` 判断探测结果。节点可达且 CN 可连接时，统计查询仍可能失败。请查看具体失败项和错误原因。兼容性探测和全库巡检的验收范围见 [OpenTenBase 兼容性记录](docs/OTB_COMPATIBILITY.md)。
 
