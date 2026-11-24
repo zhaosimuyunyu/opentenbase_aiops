@@ -89,7 +89,7 @@ class ReadonlyHealthCollector:
         self.statement_timeout_ms = statement_timeout_ms
         self.lock_timeout_ms = lock_timeout_ms
 
-    def collect(self):
+    def collect(self, *, table=None):
         connector = OpenTenBaseConnector(self.config)
         results = {}
         errors = {}
@@ -120,7 +120,7 @@ class ReadonlyHealthCollector:
             if nodes:
                 results["node_connectivity"] = self._probe_node_connectivity(nodes)
                 node_stats, node_stats_errors = self._collect_data_node_stats(
-                    connection, nodes
+                    connection, nodes, table=table
                 )
                 results["data_node_table_stats"] = node_stats
                 errors.update(node_stats_errors)
@@ -167,7 +167,7 @@ class ReadonlyHealthCollector:
             })
         return checks
 
-    def _collect_data_node_stats(self, connection, nodes):
+    def _collect_data_node_stats(self, connection, nodes, *, table=None):
         node_stats = []
         errors = {}
         data_nodes = [node for node in nodes if node.get("node_type") == "D"]
@@ -182,14 +182,28 @@ class ReadonlyHealthCollector:
                         "FROM pg_stat_user_tables "
                         "WHERE schemaname NOT IN ('pg_catalog','information_schema') LIMIT 200"
                     )
+                    if table:
+                        schema, relation = table.split(".", 1)
+                        qualified = sql.Identifier(schema, relation).as_string(connection)
+                        remote_query = sql.SQL(
+                            "SELECT {}::text AS schemaname, relname, "
+                            "pg_stat_get_live_tuples(oid) AS n_live_tup, "
+                            "pg_stat_get_mod_since_analyze(oid) AS n_mod_since_analyze, "
+                            "pg_stat_get_last_analyze_time(oid) AS last_analyze "
+                            "FROM pg_catalog.pg_class WHERE oid=pg_catalog.to_regclass({}) "
+                            "AND relkind IN ('r', 'p')"
+                        ).format(sql.Literal(schema), sql.Literal(qualified)).as_string(connection)
                     cursor.execute(
                         sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
                         (remote_query,),
                     )
                     columns = [item[0] for item in cursor.description]
+                    rows = cursor.fetchall()
+                    if table and not rows:
+                        raise ValueError("Target table statistics are unavailable on this node")
                     node_stats.extend(
                         {"node_name": name, **dict(zip(columns, row))}
-                        for row in cursor.fetchall()
+                        for row in rows
                     )
                 connection.rollback()
             except Exception as error:

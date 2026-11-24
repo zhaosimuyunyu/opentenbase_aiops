@@ -16,13 +16,13 @@ class HealthAuditScheduler:
         self.config = config or Config()
         self._run_lock = asyncio.Lock()
 
-    async def run_once(self, *, scheduled=False):
+    async def run_once(self, *, scheduled=False, table=None):
         if self._run_lock.locked():
             return None
         async with self._run_lock:
-            return await run_in_threadpool(self._run_with_database_lock, scheduled)
+            return await run_in_threadpool(self._run_with_database_lock, scheduled, table)
 
-    def _run_with_database_lock(self, scheduled):
+    def _run_with_database_lock(self, scheduled, table):
         kb = PgVectorKnowledgeBase()
         acquired = False
         try:
@@ -49,7 +49,8 @@ class HealthAuditScheduler:
                             return None
                 kb.conn.commit()
             trigger = "scheduled" if scheduled else "manual"
-            return asyncio.run(ReadonlyAuditEngine().run_health_audit(trigger=trigger))
+            options = {"table": table} if table else {}
+            return asyncio.run(ReadonlyAuditEngine().run_health_audit(trigger=trigger, **options))
         finally:
             if acquired and not kb.conn.closed:
                 try:

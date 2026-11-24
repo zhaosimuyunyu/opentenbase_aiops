@@ -2,7 +2,7 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -212,10 +212,12 @@ async def run_readonly_lock_audit():
 
 
 @app.post("/api/audits/health")
-async def run_readonly_health_audit():
+async def run_readonly_health_audit(
+    table: Optional[str] = Query(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"),
+):
     """Run and persist the read-only health audit."""
     try:
-        result = await health_audit_scheduler.run_once()
+        result = await health_audit_scheduler.run_once(table=table)
         if result is None:
             raise HTTPException(status_code=409, detail="Another health audit is already running")
         return result

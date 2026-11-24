@@ -226,10 +226,12 @@ elif page == "🛡️ 只读巡检":
         st.caption(f"周期巡检{mode} · 间隔 {automation['interval_seconds']} 秒")
     except Exception as error:
         st.warning(f"读取周期巡检状态失败: {error}")
+    statistics_target = st.text_input("目标表（可选）", placeholder="public.orders").strip()
     if st.button("运行只读巡检", type="primary"):
         with st.spinner("正在采集 OpenTenBase 状态并分析..."):
             try:
-                response = requests.post(f"{api_base}/api/audits/health", timeout=90)
+                params = {"table": statistics_target} if statistics_target else None
+                response = requests.post(f"{api_base}/api/audits/health", params=params, timeout=90)
                 if response.status_code == 409:
                     st.info("已有巡检正在运行")
                 else:
