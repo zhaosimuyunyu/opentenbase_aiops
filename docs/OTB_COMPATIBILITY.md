@@ -39,6 +39,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### `postgres` 数据库故障与目标表验收
 
+OpenTenBase v5.0 的后台清理器在查询待恢复事务前检查 `public.pg_clean_check_txn`。当前安装的 `pg_available_extensions` 中没有 `pg_clean`，CN 日志中多次出现 `create extension pg_clean please`。因此清理启动器虽已启用，当前部署缺少它所需的扩展。后续应先核对扩展与当前服务端构建的兼容性，再在隔离环境验证其只读诊断和恢复行为。 [OpenTenBase v5.0 后台清理源码](https://github.com/OpenTenBase/OpenTenBase/blob/v5.0/src/backend/postmaster/clean2pc.c)
+
 安装包中的官方 `pgxc_clean` 提供 `-N` 只读收集模式。使用 `-N -s` 连接当前 CN 时，连接成功，但工具读取到 GTM 的 `node_type=G` 后以 `Invalid catalog data (node_type)` 退出，未能给出事务恢复判定。当前 CN 的 `enable_clean_2pc_launcher` 为 `on`，目标事务仍出现在 `pg_prepared_xacts`。
 
 已逐节点只读核对该 GID 的 `pg_2pc` 文件。CN、DN1、DN2 的参与节点列表和 `global_prepare_timestamp` 一致。CN 文件另有 `global_commit_timestamp=308991314092`，两个 DN 文件均缺少该字段。这为核对 OpenTenBase 的两阶段提交恢复路径提供了持久化证据。事务仍待恢复。
