@@ -43,6 +43,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.repair_lock and not (args.repair_account and args.table):
         parser.error("--repair-lock requires --repair-account and --table")
+    if args.repair_account and args.table and not args.repair_lock:
+        parser.error("--table with --repair-account requires --repair-lock")
     if args.table and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", args.table):
         parser.error("--table must use schema.table format")
     config = Config()
@@ -74,6 +76,8 @@ def main() -> int:
     try:
         connection.set_session(readonly=True, autocommit=False)
         for name, sql in PROBES.items():
+            if args.repair_account and name not in {"connection_identity", "database_identity"}:
+                continue
             try:
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("SET LOCAL statement_timeout = '1500ms'")
@@ -115,6 +119,8 @@ def main() -> int:
         data_nodes = [node for node in nodes if node["node_type"] == "D"]
         collector = ReadonlyHealthCollector(config)
         for label, table in (("data_node_statistics", None), ("targeted_data_node_statistics", args.table)):
+            if args.repair_account:
+                break
             if label == "targeted_data_node_statistics" and not table:
                 continue
             tables, errors = collector._collect_data_node_stats(connection, data_nodes, table=table)

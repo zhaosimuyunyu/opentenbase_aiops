@@ -174,10 +174,10 @@ conn = psycopg2.connect(
 ```powershell
 docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py
 docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --table public.orders
-docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --repair-account --table public.orders
+docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --repair-account
 ```
 
-第三条命令使用配置的独立执行账号进行只读探测。报告中的逐 DN 统计项仍尝试使用该账号执行 `EXECUTE DIRECT`，普通账号可能在这些项目返回 `42501`。巡检账号的逐 DN 权限通过前两条命令验证。执行账号的表锁可在隔离表上加 `--repair-lock` 验证，`ANALYZE` 权限需通过执行验收。
+第三条命令使用独立执行账号检查登录和数据库身份。巡检账号的逐 DN 权限通过前两条命令验证。执行账号的表锁可在隔离表上加 `--repair-lock --table public.orders` 验证，`ANALYZE` 权限需通过执行验收。
 
 使用报告中的 `summary` 判断探测结果。节点可达且 CN 可连接时，统计查询仍可能失败。请查看具体失败项和错误原因。兼容性探测和全库巡检的验收范围见 [OpenTenBase 兼容性记录](docs/OTB_COMPATIBILITY.md)。
 
