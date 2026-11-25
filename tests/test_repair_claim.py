@@ -3,13 +3,12 @@ from unittest.mock import MagicMock, patch
 
 from backend.engines.repair_workflow import RepairWorkflow
 from backend.security.permissions import ApprovalWorkflow
-from backend.app import capabilities
+from backend.capabilities import CAPABILITIES
 
 
 class RepairClaimTests(unittest.TestCase):
     def test_capabilities_declare_only_verified_repair_executor(self):
-        import asyncio
-        value = asyncio.run(capabilities())
+        value = CAPABILITIES
         repairs = value["repairs"]
         self.assertEqual(repairs["verified_executors"], ["analyze_table"])
         self.assertFalse(repairs["automatic_prepared_transaction_resolution"])
