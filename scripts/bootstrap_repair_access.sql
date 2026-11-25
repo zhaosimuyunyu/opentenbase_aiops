@@ -31,3 +31,4 @@ AS allowed(target_schema, target_table);
 REVOKE ALL ON aiops_admin.repair_targets FROM PUBLIC;
 GRANT USAGE ON SCHEMA aiops_admin TO :repair_user;
 GRANT EXECUTE ON FUNCTION aiops_admin.analyze_table(text, text) TO :repair_user;
+GRANT EXECUTE ON FUNCTION aiops_admin.is_analyze_target_allowed(text, text) TO :repair_user;
