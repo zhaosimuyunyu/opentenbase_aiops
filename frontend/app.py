@@ -144,6 +144,24 @@ def render_analysis_status(analysis):
         st.warning(message + suffix)
 
 
+def render_reanalysis_button(api_base, audit_id, analysis, key_prefix):
+    if not isinstance(analysis, dict) or not analysis.get("analysis_fallback"):
+        return None
+    if not st.button("重试 AI 分析", key=f"{key_prefix}-{audit_id}"):
+        return None
+    try:
+        response = requests.post(
+            f"{api_base}/api/audits/{audit_id}/reanalyze",
+            timeout=st.session_state.config.AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        st.success("已使用已保存的审计证据重新分析")
+        return response.json()
+    except requests.RequestException as error:
+        st.error(f"重新分析失败: {error}")
+        return None
+
+
 def render_collection_status(evidence):
     diagnostics = (evidence.get("cluster") or {}).get("pg_clean_diagnostics") or []
     if diagnostics and any(
@@ -402,6 +420,12 @@ elif page == "🛡️ 只读巡检":
                 st.error(f"巡检失败: {error}")
     audit = st.session_state.get("last_health_audit")
     if audit:
+        retried_analysis = render_reanalysis_button(
+            api_base, audit["audit_id"], audit, "health-reanalyze"
+        )
+        if retried_analysis:
+            audit.update(retried_analysis)
+            st.session_state.last_health_audit = audit
         st.metric("风险等级", audit["risk_level"])
         evidence = audit.get("evidence") or {}
         render_collection_status(evidence)
@@ -465,8 +489,14 @@ elif page == "📜 巡检历史":
                 evidence = detail.get("evidence") or {}
                 render_collection_status(evidence)
                 render_repair_proposal(api_base, selected_id, evidence.get("findings", []))
-                render_analysis_status(detail.get("ai_analysis"))
-                st.json(detail.get("ai_analysis", {}))
+                analysis = detail.get("ai_analysis") or {}
+                retried_analysis = render_reanalysis_button(
+                    api_base, selected_id, analysis, "history-reanalyze"
+                )
+                if retried_analysis:
+                    analysis = retried_analysis
+                render_analysis_status(analysis)
+                st.json(analysis)
                 with st.expander("查看现场证据"):
                     st.json(detail.get("evidence", {}))
                 with st.expander("查看知识引用"):
