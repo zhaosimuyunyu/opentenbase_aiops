@@ -37,6 +37,9 @@ class Config:
     AIOPS_SAFETY_REVIEW_API_BASE: str = os.getenv("AIOPS_SAFETY_REVIEW_API_BASE", "")
     AIOPS_SAFETY_REVIEW_PROVIDER: str = os.getenv("AIOPS_SAFETY_REVIEW_PROVIDER", "")
     DEEPSEEK_TIMEOUT_SECONDS: float = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "45"))
+    AIOPS_AI_AUDIT_TIMEOUT_SECONDS: float = max(
+        10.0, float(os.getenv("AIOPS_AI_AUDIT_TIMEOUT_SECONDS", "120"))
+    )
     AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS: float = float(
         os.getenv("AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS", "210")
     )

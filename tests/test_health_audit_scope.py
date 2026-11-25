@@ -1,4 +1,5 @@
 import json
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +8,43 @@ from backend.collectors.readonly_health import stale_statistics_nodes
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ai_audit_timeout_returns_rule_fallback(self):
+        engine = ReadonlyAuditEngine()
+        engine.config.AIOPS_AI_AUDIT_TIMEOUT_SECONDS = 0.01
+        async def slow_diagnosis(*_args):
+            await asyncio.sleep(1)
+
+        with patch.object(
+            engine, "_diagnose", new=AsyncMock(side_effect=slow_diagnosis)
+        ):
+            result = await engine._diagnose_with_budget("audit", {"findings": []})
+        self.assertTrue(result["analysis_fallback"])
+        self.assertEqual(result["ai_error"], "TimeoutError")
+
+    async def test_health_audit_persists_evidence_when_ai_budget_expires(self):
+        module = "backend.engines.readonly_audit_engine"
+        engine = ReadonlyAuditEngine()
+        engine.config.AIOPS_AI_AUDIT_TIMEOUT_SECONDS = 0.01
+        snapshot = {
+            "status": "success", "errors": {},
+            "checks": {
+                "locks": [], "connections": [], "max_connections": [{"max_connections": 100}],
+                "long_running_queries": [], "idle_transactions": [], "nodes": [],
+            },
+        }
+        async def slow_diagnosis(*_args):
+            await asyncio.sleep(1)
+
+        with patch(f"{module}.OperationsStore") as store, patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(engine, "_diagnose", new=slow_diagnosis):
+            collector.return_value.collect.return_value = snapshot
+            result = await engine.run_health_audit()
+        self.assertTrue(result["analysis_fallback"])
+        self.assertEqual(result["structured"]["analysis_source"], "deterministic_evidence_rules")
+        persisted = store.return_value.conn.cursor.return_value.__enter__
+        self.assertTrue(persisted.return_value.execute.called)
+
     async def test_prepared_transaction_reports_missing_official_record_diagnostic(self):
         module = "backend.engines.readonly_audit_engine"
         snapshot = {

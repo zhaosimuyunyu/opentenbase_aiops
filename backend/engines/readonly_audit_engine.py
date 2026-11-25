@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+import asyncio
 from openai import APIStatusError
 from ..tools.knowledge_search_tool import execute_search_knowledge
 from ..tools.lock_audit_tool import execute_get_database_locks
@@ -56,6 +57,18 @@ class ReadonlyAuditEngine:
                 )
         return analysis
 
+    async def _diagnose_with_budget(self, issue, evidence):
+        """Bound the complete model/tool loop while preserving deterministic fallback."""
+        try:
+            return await asyncio.wait_for(
+                self._diagnose(issue, evidence),
+                timeout=self.config.AIOPS_AI_AUDIT_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return AIOpsAgent._fallback_diagnosis(
+                evidence, TimeoutError("AI audit time budget exceeded")
+            )
+
     async def run_lock_audit(self):
         locks = await execute_get_database_locks(True)
         if locks['collection_status'] == 'error':
@@ -65,7 +78,7 @@ class ReadonlyAuditEngine:
                 'tool_called': False,
             }
         else:
-            analysis = await self._diagnose(
+            analysis = await self._diagnose_with_budget(
                 f"发现 {locks['blocked_locks']} 个阻塞锁，请分析原因并给出只读建议", locks
             )
         structured = analysis.get('structured') or {}
@@ -388,7 +401,7 @@ class ReadonlyAuditEngine:
         else:
             if progress:
                 progress("diagnosing")
-            analysis = await self._diagnose(issue, evidence)
+            analysis = await self._diagnose_with_budget(issue, evidence)
             structured = analysis.get('structured') or {}
             risk_level = structured.get('risk_level')
             if isinstance(risk_level, str):
