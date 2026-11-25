@@ -138,6 +138,8 @@ opentenbase-aiops/
 
 如果业务表不适合转移给修复账号所有，管理员可以使用 `scripts/install_repair_function.sql` 安装最小权限的 `SECURITY DEFINER` 统计函数。该函数只接受正则校验后的 schema/table，并且只允许管理员维护的 `aiops_admin.repair_targets` 视图中列出的目标。视图默认为空，管理员可按脚本示例将其替换为显式 `VALUES` 白名单，不需要创建分布式配置表。管理员完成函数和目标白名单后，将 `AIOPS_REPAIR_FUNCTION_ENABLED=true` 配合独立非超级用户启用。应用会检查函数确实是 `SECURITY DEFINER` 且当前账号有 `EXECUTE` 权限，否则回退到逐 DN 所有权校验并拒绝越权执行。
 
+也可以使用 `scripts/bootstrap_repair_access.sql` 一次创建非超级用户、安装函数并登记一个允许维护的目标。该文件只接受运行时 `psql -v` 变量，仓库不保存数据库密码。
+
 `POST /api/sql-audit` 接收单条 SQL，返回规则命中和风险等级。对未命中高风险规则的 `SELECT`、`WITH`、`VALUES` 语句，可运行带超时限制的只读 `EXPLAIN (FORMAT JSON)`。多条 SQL 会被拒绝。`GET /api/distributed/nodes` 和 `POST /api/distributed/collect` 从 `pgxc_node` 发现 CN/DN，并运行内置只读检查，逐节点报告连接或查询失败。集群注册地址必须能从 API 容器访问。
 
 `AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。
