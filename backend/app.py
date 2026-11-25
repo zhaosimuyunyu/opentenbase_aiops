@@ -77,6 +77,10 @@ class RepairApprovalRequest(BaseModel):
     token: str
 
 
+class RepairHumanApprovalRequest(BaseModel):
+    token: str
+
+
 class RepairRejectionRequest(BaseModel):
     approver: str
     reason: str
@@ -575,6 +579,19 @@ def approve_repair_request(request_id: str, request: RepairApprovalRequest):
     except Exception as error:
         logger.exception("Failed to execute repair request")
         raise HTTPException(status_code=503, detail="Repair execution is unavailable") from error
+
+
+@app.post("/api/repairs/{request_id}/human-approval")
+def record_human_repair_approval(request_id: str, request: RepairHumanApprovalRequest):
+    try:
+        return RepairWorkflow().record_human_approval(request_id, request.token)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to record human repair approval")
+        raise HTTPException(status_code=503, detail="Repair approval is unavailable") from error
 
 
 @app.post("/api/repairs/{request_id}/reject")

@@ -497,12 +497,24 @@ elif page == "🧾 修复审批":
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 proposal_evidence = item.get("evidence") or {}
                 model_review = proposal_evidence.get("model_review") or {}
+                agent_review = proposal_evidence.get("agent_review") or {}
+                human_approval = proposal_evidence.get("human_approval") or {}
                 program_review = proposal_evidence.get("program_review") or {}
-                ready = program_review.get("approved") is True and model_review.get("approved") is True
+                reviews_ready = all((review.get("approved") is True) for review in
+                                    (program_review, model_review, agent_review))
+                ready = reviews_ready and human_approval.get("approved") is True
                 if ready:
-                    st.caption("程序校验通过 · Agent 复核通过")
+                    st.caption("程序校验、模型复核、独立 Agent 复核和人工审批均已通过")
                     if model_review.get("reason"):
                         st.text(model_review["reason"])
+                    if agent_review.get("reason"):
+                        st.text(agent_review["reason"])
+                elif reviews_ready:
+                    st.success("程序校验、模型复核和独立 Agent 复核通过，等待人工批准")
+                    if model_review.get("reason"):
+                        st.caption(f"模型复核：{model_review['reason']}")
+                    if agent_review.get("reason"):
+                        st.caption(f"Agent 复核：{agent_review['reason']}")
                 if proposal_evidence.get("proposal_source") == "stale_table_statistics":
                     st.caption("提案来源 · 表统计过时巡检规则")
                 stale_nodes = (proposal_evidence.get("observation") or {}).get("stale_nodes") or []
@@ -558,12 +570,21 @@ elif page == "🧾 修复审批":
                                 st.rerun()
                             st.error(response.text)
                 if item["status"] == "pending":
-                    if not ready:
-                        st.warning("待补审。请从原始巡检重新提交修复提案。")
                     approver = st.session_state.config.AIOPS_APPROVER_ID
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)
-                    if left.button("批准并执行", key=f"approve-{item['request_id']}", disabled=not ready):
+                    if left.button("人工批准", key=f"human-approve-{item['request_id']}",
+                                   disabled=not reviews_ready or human_approval.get("approved") is True):
+                        response = requests.post(
+                            f"{api_base}/api/repairs/{item['request_id']}/human-approval",
+                            json={"token": token}, timeout=10,
+                        )
+                        if response.ok:
+                            st.rerun()
+                        st.error(response.text)
+                    if human_approval.get("approved"):
+                        st.caption(f"人工批准人：{human_approval.get('approver')}")
+                    if right.button("执行已批准操作", key=f"approve-{item['request_id']}", disabled=not ready):
                         try:
                             response = requests.post(
                                 f"{api_base}/api/repairs/{item['request_id']}/approve",
@@ -580,8 +601,8 @@ elif page == "🧾 修复审批":
                                 st.session_state.repair_decision = response.json()
                                 st.rerun()
                             st.error(response.text)
-                    reject_reason = right.text_input("拒绝原因", key=f"r-{item['request_id']}")
-                    if right.button("拒绝", key=f"reject-{item['request_id']}"):
+                    reject_reason = st.text_input("拒绝原因", key=f"r-{item['request_id']}")
+                    if st.button("拒绝", key=f"reject-{item['request_id']}"):
                         response = requests.post(f"{api_base}/api/repairs/{item['request_id']}/reject", json={"approver": approver, "reason": reject_reason, "token": token}, timeout=10)
                         if response.ok:
                             st.session_state.repair_decision = response.json()

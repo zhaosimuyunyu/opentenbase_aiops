@@ -77,11 +77,11 @@ class RepairWorkflow:
             cur.execute("""
                 SELECT count(*) FROM pg_catalog.pg_attribute
                 WHERE attrelid = to_regclass('repair_requests')
-                  AND attname IN ('audit_id', 'finding', 'manual_review')
+                  AND attname IN ('audit_id', 'finding', 'manual_review', 'agent_review')
                   AND NOT attisdropped
             """)
             columns = cur.fetchone()
-            if columns and columns[0] == 3:
+            if columns and columns[0] == 4:
                 return
             cur.execute("SELECT pg_advisory_xact_lock(hashtext('aiops.repair_requests.schema'))")
             cur.execute("""CREATE TABLE IF NOT EXISTS repair_requests(
@@ -92,6 +92,7 @@ class RepairWorkflow:
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS audit_id text")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS finding jsonb")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS manual_review jsonb")
+            cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS agent_review jsonb")
 
     @staticmethod
     def _read_data_node_stats(connection, schema_name, table_name):
@@ -171,7 +172,7 @@ class RepairWorkflow:
                 raise ValueError("Pending proposal references a different finding")
             if existing[1] != "pending" or all(
                 (existing[4].get(key) or {}).get("approved") is True
-                for key in ("program_review", "model_review")
+                for key in ("program_review", "model_review", "agent_review")
             ):
                 return {
                     "request_id": existing[0], "status": existing[1],
@@ -181,6 +182,11 @@ class RepairWorkflow:
             "program_review": {"approved": True},
             "model_review": self._review_proposal(
                 operation, params["table"], observation, (evidence or {}).get("review_context")
+            ),
+            "agent_review": self._review_proposal(
+                operation, params["table"], observation,
+                {**((evidence or {}).get("review_context") or {}),
+                 "review_role": "independent_safety_agent"},
             ),
         }
         evidence = {**(evidence or {}), **reviews}
@@ -202,7 +208,8 @@ class RepairWorkflow:
                             "UPDATE repair_requests SET evidence=evidence || %s WHERE request_id=%s "
                             "AND status='pending' AND NOT "
                             "(evidence @> '{\"program_review\":{\"approved\":true},"
-                            "\"model_review\":{\"approved\":true}}'::jsonb)",
+                            "\"model_review\":{\"approved\":true},"
+                            "\"agent_review\":{\"approved\":true}}'::jsonb)",
                             (Json(reviews), existing[0]),
                         )
                     return {
@@ -265,9 +272,11 @@ class RepairWorkflow:
                 operation, params, _, audit_id, finding, reviews = request
                 if any(
                     (reviews.get(key) or {}).get("approved") is not True
-                    for key in ("program_review", "model_review")
+                    for key in ("program_review", "model_review", "agent_review")
                 ):
-                    raise ValueError("Resubmit the proposal for program and model review before approval")
+                    raise ValueError("Resubmit the proposal for program, model, and agent review before approval")
+                if not (reviews.get("human_approval") or {}).get("approved"):
+                    raise ValueError("Human approval must be recorded before execution")
                 table = _table_name(params["table"])
                 if operation != "analyze_table" or not audit_id or not finding:
                     raise ValueError("Repair request must reference a persisted audit finding")
@@ -475,6 +484,36 @@ class RepairWorkflow:
                 if not cur.fetchone():
                     raise ValueError("Repair request is missing or is not pending")
                 return {"request_id": request_id, "status": "rejected"}
+        finally:
+            kb.close()
+
+    def record_human_approval(self, request_id, token):
+        approver = self._authorize_decision(token)
+        kb = OperationsStore()
+        try:
+            self._ensure_schema(kb)
+            with kb.conn, kb.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT evidence,status FROM repair_requests WHERE request_id=%s FOR UPDATE",
+                    (request_id,),
+                )
+                row = cur.fetchone()
+                if row is None or row[1] != "pending":
+                    raise ValueError("Repair request is missing or is not pending")
+                evidence = row[0] or {}
+                if any((evidence.get(key) or {}).get("approved") is not True
+                       for key in ("program_review", "model_review", "agent_review")):
+                    raise ValueError("Program, model, and agent reviews must pass before human approval")
+                evidence["human_approval"] = {
+                    "approved": True,
+                    "approver": approver,
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                }
+                cur.execute(
+                    "UPDATE repair_requests SET evidence=%s WHERE request_id=%s AND status='pending'",
+                    (Json(evidence), request_id),
+                )
+                return {"request_id": request_id, "human_approval": evidence["human_approval"]}
         finally:
             kb.close()
 

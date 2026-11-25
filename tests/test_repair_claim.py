@@ -31,7 +31,7 @@ class RepairClaimTests(unittest.TestCase):
                 "nodes": [{"node_name": "dn1", "relation_oid": 123}],
             },
         }
-        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}}
+        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}, "agent_review": {"approved": True}, "human_approval": {"approved": True}}
         cursor.fetchone.return_value = ("request-1", "pending", parameters, finding, reviews)
         with patch.object(workflow, "_ensure_schema"), patch.object(
             workflow, "_review_proposal"
@@ -57,7 +57,7 @@ class RepairClaimTests(unittest.TestCase):
         with patch.object(workflow, "_ensure_schema"), patch(
             f"{module}.OperationsStore", return_value=store
         ), patch(f"{module}.OpenTenBaseConnector") as connector:
-            with self.assertRaisesRegex(ValueError, "program and model review"):
+            with self.assertRaisesRegex(ValueError, "program, model, and agent review"):
                 workflow.approve_and_execute("request-1", "operator", "test-token")
             connector.assert_not_called()
             store.conn.commit.assert_not_called()
@@ -110,7 +110,7 @@ class RepairClaimTests(unittest.TestCase):
             "check": "stale_table_statistics",
             "evidence": {"schema": "public", "table": "orders"},
         }
-        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}}
+        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}, "agent_review": {"approved": True}, "human_approval": {"approved": True}}
         cursor.fetchone.side_effect = [
             ("analyze_table", parameters, "pending", "audit-1", finding, reviews),
             ("analyze_table", parameters, "executing", "audit-1", finding, reviews),
