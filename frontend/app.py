@@ -115,8 +115,8 @@ def render_analysis_status(analysis):
     tool_errors = set(analysis.get("tool_errors") or [])
     tool_trace = analysis.get("tool_trace") or []
     if tool_trace:
-        with st.expander("诊断工具调用"):
-            st.dataframe(tool_trace, hide_index=True, use_container_width=True)
+        st.caption("诊断工具调用")
+        st.dataframe(tool_trace, hide_index=True, use_container_width=True)
     if "KnowledgeToolCallLimit" in tool_errors:
         st.warning("已达到本次巡检的知识检索次数上限")
         tool_errors.remove("KnowledgeToolCallLimit")
@@ -539,6 +539,8 @@ elif page == "🧾 修复审批":
                     st.error("修复执行失败")
                 if item.get("result") is not None:
                     st.write("已保存的处置结果")
+                    for notice in (item["result"].get("database_notices") or []):
+                        st.warning(notice)
                     st.json(item["result"])
                 if item.get("manual_review"):
                     st.write("人工复核记录")
