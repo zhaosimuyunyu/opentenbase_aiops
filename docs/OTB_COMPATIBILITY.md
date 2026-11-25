@@ -61,6 +61,8 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 
 ### 只读采集耗时基线
 
+隔离对照实验在同版本 CN 和 DN 上创建显式预备事务，停机后仅为隔离 CN 的测试记录补入合成提交时间戳。重启后，`pg_clean_check_txn(10)` 报告全局及两个参与节点均为 `TXN_STATUS_PREPARED`。源码在显式事务已过第一阶段且参与节点均为 PREPARED 时提前返回该状态。实验已还原隔离文件并回滚，回查 CN 和 DN 均无残留预备事务，测试表和节点组已清理。现场为隐式事务，仍需独立验证其补提交路径。
+
 从 API 容器直接调用 `ReadonlyHealthCollector.collect`，连接真实两 DN 集群的 `lab`。全库和 `public.memories` 两组各串行运行 20 次，均为 20/20 成功。耗时包括建立连接和采集，范围止于采集器返回。
 
 | 采集范围 | 中位数 | P95（最近秩） | 最大值 |
