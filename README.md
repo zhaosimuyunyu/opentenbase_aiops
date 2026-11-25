@@ -307,3 +307,6 @@ OpenTenBase AIOps 开发团队
 ---
 
 ⭐ 如果这个项目对您有帮助，请给我们一个 Star！
+### Audit analysis retry
+
+`POST /api/audits/{audit_id}/reanalyze` reruns the model analysis from persisted read-only evidence. It does not recollect the database or execute SQL, and the stored finding severity remains the minimum risk level.

@@ -22,6 +22,7 @@ from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
 from .engines.sql_audit import audit_sql
+from .engines.audit_reanalysis import reanalyze_persisted_audit
 from .capabilities import CAPABILITIES
 
 logger = setup_logger(__name__)
@@ -556,6 +557,20 @@ def get_audit(audit_id: str):
     finally:
         if kb is not None:
             kb.close()
+
+
+@app.post("/api/audits/{audit_id}/reanalyze")
+async def reanalyze_audit(audit_id: str):
+    """Retry AI analysis from persisted read-only evidence without recollecting or executing SQL."""
+    try:
+        return await reanalyze_persisted_audit(audit_id)
+    except HTTPException:
+        raise
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Failed to reanalyze audit")
+        raise HTTPException(status_code=503, detail="Audit reanalysis is unavailable") from error
 
 
 @app.post("/api/audits/{audit_id}/repair-requests")
