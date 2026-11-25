@@ -498,6 +498,9 @@ elif page == "🧾 修复审批":
                     st.text(model_review["reason"])
                 if proposal_evidence.get("proposal_source") == "stale_table_statistics":
                     st.caption("提案来源 · 表统计过时巡检规则")
+                stale_nodes = (proposal_evidence.get("observation") or {}).get("stale_nodes") or []
+                if stale_nodes:
+                    st.caption(f"统计过时节点 · {', '.join(stale_nodes)}")
                 render_analysis_status(proposal_evidence.get("ai_analysis"))
                 st.json({"parameters": item.get("parameters"), "evidence": proposal_evidence, "reason": item.get("reason")})
                 audit_id = item.get("audit_id")
