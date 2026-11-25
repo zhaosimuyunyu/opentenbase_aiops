@@ -17,15 +17,21 @@ class HealthAuditScheduler:
         self.config = config or Config()
         self._run_lock = asyncio.Lock()
 
-    async def run_once(self, *, scheduled=False, table=None, progress=None):
+    async def run_once(self, *, scheduled=False, table=None, progress=None,
+                       trigger=None, trigger_context=None):
         if self._run_lock.locked():
             return None
         async with self._run_lock:
             if progress is not None:
-                return await run_in_threadpool(self._run_with_database_lock, scheduled, table, progress)
-            return await run_in_threadpool(self._run_with_database_lock, scheduled, table)
+                return await run_in_threadpool(
+                    self._run_with_database_lock, scheduled, table, progress, trigger, trigger_context
+                )
+            return await run_in_threadpool(
+                self._run_with_database_lock, scheduled, table, None, trigger, trigger_context
+            )
 
-    def _run_with_database_lock(self, scheduled, table, progress=None):
+    def _run_with_database_lock(self, scheduled, table, progress=None,
+                                trigger=None, trigger_context=None):
         target = Json(self.config.audit_target)
         kb = OperationsStore()
         acquired = False
@@ -57,11 +63,15 @@ class HealthAuditScheduler:
                         if cursor.fetchone()[0]:
                             return None
                 kb.conn.commit()
-            trigger = "scheduled" if scheduled else "manual"
+            audit_trigger = "scheduled" if scheduled else (trigger or "manual")
             options = {"table": table} if table else {}
             if progress is not None:
                 options["progress"] = progress
-            return asyncio.run(ReadonlyAuditEngine(self.config).run_health_audit(trigger=trigger, **options))
+            if trigger_context:
+                options["trigger_context"] = trigger_context
+            return asyncio.run(
+                ReadonlyAuditEngine(self.config).run_health_audit(trigger=audit_trigger, **options)
+            )
         finally:
             if acquired and not kb.conn.closed:
                 try:

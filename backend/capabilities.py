@@ -10,6 +10,8 @@ CAPABILITIES = {
         "sql_static_rules": True,
         "readonly_explain": True,
         "distributed_cn_dn_checks": True,
+        "alertmanager_agent_trigger": True,
+        "alert_task_status": True,
     },
     "knowledge": {
         "pgvector": True,

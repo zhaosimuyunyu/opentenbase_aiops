@@ -153,7 +153,7 @@ OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。配�
 
 仓库中的 `monitoring/prometheus.yml` 可用于同一 Docker 网络中的独立 Prometheus 实例。将它和 `aiops-alerts.yml` 放在实例的同一配置目录。
 
-示例将告警发给同一网络内的 `alertmanager:9093`。`monitoring/alertmanager.yml` 提供 webhook 路由，部署时将 `webhook_configs` 的 URL 改为实际接收端地址。
+示例将告警发给同一网络内的 AIOps API。`monitoring/alertmanager.yml` 默认使用 `http://aiops-api:8000/api/alerts`，firing 告警会创建后台只读 Agent 审计任务，结果写入巡检历史。通过 `GET /api/alerts/{task_id}` 查询任务状态。resolved 告警只记录为忽略，不会重复触发巡检。
 
 将 AIOps API 的 `/metrics` 加入现有 Prometheus，抓取任务名设为 `opentenbase-aiops`。
 在同一 Docker 网络中使用 `aiops-api:8000`，在宿主机运行 Prometheus 时使用 `127.0.0.1:8000`。

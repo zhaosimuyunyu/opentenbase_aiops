@@ -23,6 +23,7 @@ from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
 from .engines.sql_audit import audit_sql
 from .engines.audit_reanalysis import reanalyze_persisted_audit
+from .engines.alert_tasks import AlertTaskStore
 from .capabilities import CAPABILITIES
 
 logger = setup_logger(__name__)
@@ -34,6 +35,12 @@ health_audit_scheduler = HealthAuditScheduler(config)
 @asynccontextmanager
 async def lifespan(_app):
     scheduler_task = None
+    try:
+        interrupted = await asyncio.to_thread(AlertTaskStore().mark_interrupted)
+        if interrupted:
+            logger.warning("Marked %s interrupted alert audit task(s) after service startup", interrupted)
+    except Exception:
+        logger.exception("Failed to recover alert audit task state")
     if config.AIOPS_AUTO_AUDIT_ENABLED:
         scheduler_task = asyncio.create_task(health_audit_scheduler.run_forever())
     try:
@@ -100,6 +107,12 @@ class RepairRejectionRequest(BaseModel):
 class RepairProposalRequest(BaseModel):
     reason: str
     finding_index: int = Field(ge=0)
+
+
+class AlertmanagerRequest(BaseModel):
+    status: str = "firing"
+    groupKey: str = ""
+    alerts: list[dict] = Field(default_factory=list)
 
 
 @app.get("/")
@@ -430,6 +443,50 @@ def get_automation_status():
     finally:
         if kb is not None:
             kb.close()
+
+
+@app.post("/api/alerts", status_code=202)
+async def receive_alertmanager_alert(request: AlertmanagerRequest):
+    """Start a bounded read-only Agent audit from an Alertmanager webhook."""
+    if request.status == "resolved" or not request.alerts:
+        return {"accepted": False, "reason": "No active alerts to audit"}
+    allowed_fields = {"alertname", "severity", "instance", "job", "summary", "description"}
+    labels = []
+    for alert in request.alerts:
+        values = {**(alert.get("labels") or {}), **(alert.get("annotations") or {})}
+        labels.append({
+            key: str(value)[:500]
+            for key, value in values.items()
+            if key in allowed_fields and value is not None
+        })
+    target = next((item.get("table") for item in labels if item.get("table")), None)
+    task_store = AlertTaskStore()
+    task_id = task_store.create(request.status, labels, target)
+
+    async def run_alert_audit():
+        try:
+            result = await health_audit_scheduler.run_once(
+                table=target, trigger="alertmanager", trigger_context={
+                    "group_key": request.groupKey[:200], "alerts": labels,
+                },
+            )
+            task_store.finish(
+                task_id, status="completed" if result else "busy", result=result
+            )
+        except Exception as error:
+            logger.exception("Alert-triggered audit failed")
+            task_store.finish(task_id, status="failed", error_type=type(error).__name__)
+
+    asyncio.create_task(run_alert_audit())
+    return {"accepted": True, "task_id": task_id, "target": target}
+
+
+@app.get("/api/alerts/{task_id}")
+def get_alert_task(task_id: str):
+    task = AlertTaskStore().get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Alert task not found")
+    return task
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

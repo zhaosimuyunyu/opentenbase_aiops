@@ -42,6 +42,20 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         knowledge_base.conn.commit.assert_any_call()
         knowledge_base.close.assert_called_once()
 
+    async def test_passes_alert_trigger_context_into_persisted_audit(self):
+        store = MagicMock()
+        store.conn.closed = False
+        store.conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (True,)
+        context = {"group_key": "group-1", "alerts": [{"alertname": "high-risk"}]}
+        with patch(
+            "backend.engines.health_audit_scheduler.OperationsStore", return_value=store
+        ), patch("backend.engines.health_audit_scheduler.ReadonlyAuditEngine") as engine:
+            engine.return_value.run_health_audit = AsyncMock(return_value={"audit_id": "audit-1"})
+            await HealthAuditScheduler().run_once(trigger="alertmanager", trigger_context=context)
+        engine.return_value.run_health_audit.assert_awaited_once_with(
+            trigger="alertmanager", trigger_context=context
+        )
+
     async def test_skips_scheduled_audit_with_recent_persisted_record(self):
         store = MagicMock()
         store.conn.closed = False

@@ -113,7 +113,8 @@ class ReadonlyAuditEngine:
                 'risk_level': risk_level,
                 'evidence': locks, **analysis}
 
-    async def run_health_audit(self, *, trigger="manual", table=None, progress=None):
+    async def run_health_audit(self, *, trigger="manual", table=None, progress=None,
+                               trigger_context=None):
         """Run read-only checks across cluster, capacity, locks, and query health."""
         if progress:
             progress("collecting")
@@ -365,6 +366,7 @@ class ReadonlyAuditEngine:
         )
         evidence = {
             'trigger': trigger,
+            'trigger_context': trigger_context or {},
             'statistics_target': table,
             'audit_target': self.config.audit_target,
             'collection_status': snapshot['status'],

@@ -8,5 +8,5 @@ route:
 receivers:
   - name: aiops-webhook
     webhook_configs:
-      - url: http://aiops-webhook:8080/alerts
+      - url: http://aiops-api:8000/api/alerts
         send_resolved: true
