@@ -297,6 +297,7 @@ class RepairWorkflow:
                 db = OpenTenBaseConnector(repair_config)
                 stats_db = OpenTenBaseConnector(self.config)
                 execution_attempted = False
+                analyze_notices = []
                 database_session_user = None
                 try:
                     conn = db.connect()
@@ -362,9 +363,11 @@ class RepairWorkflow:
                         if not stale_nodes:
                             raise ValueError("The original ANALYZE finding is no longer present")
                         execution_attempted = True
-                        target.execute(
-                            sql.SQL("ANALYZE {}").format(relation)
-                        )
+                        conn.notices.clear()
+                        try:
+                            target.execute(sql.SQL("ANALYZE {}").format(relation))
+                        finally:
+                            analyze_notices = [notice.strip() for notice in conn.notices]
                     conn.commit()
                     # The statistics collector can publish updates after ANALYZE commits.
                     for delay in (0, 0.5, 1, 2):
@@ -435,6 +438,8 @@ class RepairWorkflow:
                     stats_db.close()
                     db.close()
                 result["database_session_user"] = database_session_user
+                if analyze_notices:
+                    result["database_notices"] = analyze_notices
                 status = "executed" if result["success"] else (
                     "unverified" if execution_attempted else "failed"
                 )
