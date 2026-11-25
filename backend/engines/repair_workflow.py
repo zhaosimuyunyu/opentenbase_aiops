@@ -423,6 +423,12 @@ class RepairWorkflow:
                 if not row or row[2] != "pending":
                     raise ValueError("Automatic repair request is missing or no longer pending")
                 operation, parameters, _, stored_audit, stored_finding, stored_evidence = row
+                if stored_evidence.get("proposal_source") != "scheduled_auto_repair":
+                    return {
+                        "status": "skipped",
+                        "reason": "existing_repair_request_was_not_created_by_automatic_policy",
+                        "request_id": request_id,
+                    }
                 fingerprint = _proposal_fingerprint(operation, parameters, stored_audit, stored_finding)
                 stored_evidence["automatic_policy"] = {
                     "approved": True, "actor": "aiops-auto-policy",
