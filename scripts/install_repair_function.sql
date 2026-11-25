@@ -4,11 +4,9 @@
 CREATE SCHEMA IF NOT EXISTS aiops_admin;
 REVOKE ALL ON SCHEMA aiops_admin FROM PUBLIC;
 
-CREATE TABLE IF NOT EXISTS aiops_admin.repair_targets (
-    target_schema text NOT NULL,
-    target_table text NOT NULL,
-    PRIMARY KEY (target_schema, target_table)
-);
+CREATE OR REPLACE VIEW aiops_admin.repair_targets AS
+SELECT NULL::text AS target_schema, NULL::text AS target_table
+WHERE false;
 REVOKE ALL ON aiops_admin.repair_targets FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION aiops_admin.analyze_table(target_schema text, target_table text)
@@ -38,6 +36,7 @@ REVOKE ALL ON FUNCTION aiops_admin.analyze_table(text, text) FROM PUBLIC;
 GRANT USAGE ON SCHEMA aiops_admin TO :repair_user;
 GRANT EXECUTE ON FUNCTION aiops_admin.analyze_table(text, text) TO :repair_user;
 
--- Add explicit targets as administrator, for example:
--- INSERT INTO aiops_admin.repair_targets(target_schema, target_table)
--- VALUES ('public', 'orders');
+-- Replace the empty view with an explicit administrator-maintained allowlist, for example:
+-- CREATE OR REPLACE VIEW aiops_admin.repair_targets AS
+-- SELECT * FROM (VALUES ('public', 'orders'), ('public', 'items'))
+-- AS allowed(target_schema, target_table);
