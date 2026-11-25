@@ -5,6 +5,19 @@ from backend.engines.repair_workflow import RepairWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_destructive_proposals_are_blocked_before_model_or_database(self):
+        workflow = RepairWorkflow()
+        module = "backend.engines.repair_workflow"
+        with patch.object(workflow, "_review_proposal") as review, patch(
+            f"{module}.OperationsStore"
+        ) as store:
+            for operation in ("drop_database", "drop_table", "execute_sql"):
+                with self.subTest(operation=operation):
+                    with self.assertRaisesRegex(ValueError, "Operation is not enabled"):
+                        workflow.create_request(operation, {"table": "public.orders"}, {}, "test")
+            review.assert_not_called()
+            store.assert_not_called()
+
     def test_resubmitting_reviewed_proposal_skips_model(self):
         workflow = RepairWorkflow()
         store = MagicMock()
