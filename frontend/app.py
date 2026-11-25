@@ -493,9 +493,12 @@ elif page == "🧾 修复审批":
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 proposal_evidence = item.get("evidence") or {}
                 model_review = proposal_evidence.get("model_review") or {}
-                if model_review.get("approved"):
+                program_review = proposal_evidence.get("program_review") or {}
+                ready = program_review.get("approved") is True and model_review.get("approved") is True
+                if ready:
                     st.caption("程序校验通过 · Agent 复核通过")
-                    st.text(model_review["reason"])
+                    if model_review.get("reason"):
+                        st.text(model_review["reason"])
                 if proposal_evidence.get("proposal_source") == "stale_table_statistics":
                     st.caption("提案来源 · 表统计过时巡检规则")
                 stale_nodes = (proposal_evidence.get("observation") or {}).get("stale_nodes") or []
@@ -549,10 +552,12 @@ elif page == "🧾 修复审批":
                                 st.rerun()
                             st.error(response.text)
                 if item["status"] == "pending":
+                    if not ready:
+                        st.warning("待补审。请从原始巡检重新提交修复提案。")
                     approver = st.session_state.config.AIOPS_APPROVER_ID
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)
-                    if left.button("批准并执行", key=f"approve-{item['request_id']}"):
+                    if left.button("批准并执行", key=f"approve-{item['request_id']}", disabled=not ready):
                         try:
                             response = requests.post(
                                 f"{api_base}/api/repairs/{item['request_id']}/approve",
