@@ -147,6 +147,32 @@ class RepairWorkflow:
             raise ValueError("Repair requires a verified table statistics finding")
         if params["table"] != f"{observation.get('schema')}.{observation.get('table')}":
             raise ValueError("Repair target does not match the audited finding")
+        lookup = """
+            SELECT request_id,status,parameters,finding,evidence
+            FROM repair_requests
+            WHERE audit_id=%s AND operation=%s AND parameters->>'table'=%s
+            ORDER BY created_at DESC,request_id DESC LIMIT 1
+        """
+        lookup_parameters = (audit_id, operation, params["table"])
+        kb = OperationsStore()
+        try:
+            self._ensure_schema(kb)
+            with kb.conn, kb.conn.cursor() as cur:
+                cur.execute(lookup, lookup_parameters)
+                existing = cur.fetchone()
+        finally:
+            kb.close()
+        if existing:
+            if existing[1] == "pending" and existing[3] != finding:
+                raise ValueError("Pending proposal references a different finding")
+            if existing[1] != "pending" or all(
+                (existing[4].get(key) or {}).get("approved") is True
+                for key in ("program_review", "model_review")
+            ):
+                return {
+                    "request_id": existing[0], "status": existing[1],
+                    "operation": operation, "parameters": existing[2], "reused": True,
+                }
         reviews = {
             "program_review": {"approved": True},
             "model_review": self._review_proposal(operation, params["table"], observation),
@@ -155,18 +181,12 @@ class RepairWorkflow:
         request_id = str(uuid.uuid4())
         kb = OperationsStore()
         try:
-            self._ensure_schema(kb)
             with kb.conn, kb.conn.cursor() as cur:
                 cur.execute(
                     "SELECT pg_advisory_xact_lock(hashtext('aiops_repair_proposal'), hashtext(%s))",
                     (audit_id,),
                 )
-                cur.execute(
-                    "SELECT request_id,status,parameters,finding FROM repair_requests "
-                    "WHERE audit_id=%s AND operation=%s AND parameters->>'table'=%s "
-                    "ORDER BY created_at DESC,request_id DESC LIMIT 1",
-                    (audit_id, operation, params["table"]),
-                )
+                cur.execute(lookup, lookup_parameters)
                 existing = cur.fetchone()
                 if existing:
                     if existing[1] == "pending":
@@ -174,7 +194,9 @@ class RepairWorkflow:
                             raise ValueError("Pending proposal references a different finding")
                         cur.execute(
                             "UPDATE repair_requests SET evidence=evidence || %s WHERE request_id=%s "
-                            "AND status='pending' AND NOT (evidence ? 'model_review')",
+                            "AND status='pending' AND NOT "
+                            "(evidence @> '{\"program_review\":{\"approved\":true},"
+                            "\"model_review\":{\"approved\":true}}'::jsonb)",
                             (Json(reviews), existing[0]),
                         )
                     return {

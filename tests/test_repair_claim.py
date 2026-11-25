@@ -5,6 +5,29 @@ from backend.engines.repair_workflow import RepairWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_resubmitting_reviewed_proposal_skips_model(self):
+        workflow = RepairWorkflow()
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        parameters = {"table": "public.orders"}
+        finding = {
+            "check": "stale_table_statistics",
+            "evidence": {
+                "schema": "public", "table": "orders",
+                "database_identity": {"system_identifier": "fixture", "database": "lab"},
+                "nodes": [{"node_name": "dn1", "relation_oid": 123}],
+            },
+        }
+        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}}
+        cursor.fetchone.return_value = ("request-1", "pending", parameters, finding, reviews)
+        with patch.object(workflow, "_ensure_schema"), patch.object(
+            workflow, "_review_proposal"
+        ) as review, patch("backend.engines.repair_workflow.OperationsStore", return_value=store):
+            result = workflow.create_request("analyze_table", parameters, {}, "retry", "audit-1", finding)
+        review.assert_not_called()
+        self.assertEqual(result["request_id"], "request-1")
+        self.assertTrue(result["reused"])
+
     def test_approval_cannot_bypass_model_review(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(
