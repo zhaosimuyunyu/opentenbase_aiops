@@ -62,6 +62,26 @@ class RepairClaimTests(unittest.TestCase):
             connector.assert_not_called()
             store.conn.commit.assert_not_called()
 
+    def test_execution_requires_human_approval_record(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token",
+            DB_USER="auditor", AIOPS_REPAIR_DB_USER="repair_operator",
+        )
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (
+            "analyze_table", {"table": "public.orders"}, "pending", "audit-1", {},
+            {"program_review": {"approved": True}, "model_review": {"approved": True},
+             "agent_review": {"approved": True}},
+        )
+        with patch.object(workflow, "_ensure_schema"), patch(
+            "backend.engines.repair_workflow.OperationsStore", return_value=store
+        ), patch("backend.engines.repair_workflow.OpenTenBaseConnector") as connector:
+            with self.assertRaisesRegex(ValueError, "Human approval"):
+                workflow.approve_and_execute("request-1", "operator", "test-token")
+            connector.assert_not_called()
+
     def test_execution_requires_separate_role_before_claiming_request(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(
