@@ -136,6 +136,8 @@ opentenbase-aiops/
 
 风险策略由程序根据操作白名单和危险关键词确定，模型不能自行降低风险等级。白名单只读工具可由 Agent 自动调用。当前唯一开放的写操作是 `ANALYZE`，属于需要人工批准的中风险操作。危险或未知操作要求人工审批，且没有对应执行器时仍会拒绝执行。人工批准通过 `/api/repairs/{request_id}/human-approval` 单独记录，随后调用批准执行接口。删除库、删表和任意 SQL 不在执行白名单内。
 
+如果业务表不适合转移给修复账号所有，管理员可以使用 `scripts/install_repair_function.sql` 安装最小权限的 `SECURITY DEFINER` 统计函数。该函数只接受正则校验后的 schema/table，并且只允许 `aiops_admin.repair_targets` 中登记的目标。管理员完成函数和目标白名单后，将 `AIOPS_REPAIR_FUNCTION_ENABLED=true` 配合独立非超级用户启用。应用会检查函数确实是 `SECURITY DEFINER` 且当前账号有 `EXECUTE` 权限，否则回退到逐 DN 所有权校验并拒绝越权执行。
+
 `POST /api/sql-audit` 接收单条 SQL，返回规则命中和风险等级。对未命中高风险规则的 `SELECT`、`WITH`、`VALUES` 语句，可运行带超时限制的只读 `EXPLAIN (FORMAT JSON)`。多条 SQL 会被拒绝。`GET /api/distributed/nodes` 和 `POST /api/distributed/collect` 从 `pgxc_node` 发现 CN/DN，并运行内置只读检查，逐节点报告连接或查询失败。集群注册地址必须能从 API 容器访问。
 
 `AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。

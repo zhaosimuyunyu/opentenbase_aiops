@@ -20,6 +20,12 @@ class Config:
     DB_TYPE: str = os.getenv("DB_TYPE", "postgresql")  # 参考 AgentX
     AIOPS_REPAIR_DB_USER: str = os.getenv("AIOPS_REPAIR_DB_USER", "")
     AIOPS_REPAIR_DB_PASSWORD: str = os.getenv("AIOPS_REPAIR_DB_PASSWORD", "")
+    AIOPS_REPAIR_FUNCTION_ENABLED: bool = (
+        os.getenv("AIOPS_REPAIR_FUNCTION_ENABLED", "false").lower()
+        in {"1", "true", "yes", "on"}
+    )
+    AIOPS_REPAIR_FUNCTION_SCHEMA: str = os.getenv("AIOPS_REPAIR_FUNCTION_SCHEMA", "aiops_admin")
+    AIOPS_REPAIR_FUNCTION_NAME: str = os.getenv("AIOPS_REPAIR_FUNCTION_NAME", "analyze_table")
 
     @property
     def audit_target(self):

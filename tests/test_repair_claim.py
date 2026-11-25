@@ -50,6 +50,26 @@ class RepairClaimTests(unittest.TestCase):
         nodes[1]["execution_user_is_owner"] = True
         RepairWorkflow._require_analyze_ownership(nodes)
 
+    def test_least_privilege_repair_function_must_be_security_definer_and_granted(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (True, True)
+        self.assertTrue(RepairWorkflow._repair_function_available(
+            connection, "aiops_admin", "analyze_table"
+        ))
+        self.assertIn("procedure.prosecdef", cursor.execute.call_args.args[0])
+        connection.rollback.assert_called_once()
+
+        cursor.fetchone.return_value = (False, True)
+        self.assertFalse(RepairWorkflow._repair_function_available(
+            connection, "aiops_admin", "analyze_table"
+        ))
+
+        cursor.fetchone.return_value = (True, False)
+        self.assertFalse(RepairWorkflow._repair_function_available(
+            connection, "aiops_admin", "analyze_table"
+        ))
+
     def test_missing_repair_role_blocks_proposal_before_model_or_storage(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(

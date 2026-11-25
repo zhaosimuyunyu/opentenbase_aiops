@@ -161,6 +161,28 @@ class RepairWorkflow:
                 + ", ".join(unauthorized_nodes)
             )
 
+    @staticmethod
+    def _repair_function_available(connection, schema_name, function_name):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT procedure.prosecdef,
+                          pg_catalog.has_function_privilege(
+                              current_user,
+                              procedure.oid,
+                              'EXECUTE'
+                          )
+                   FROM pg_catalog.pg_proc AS procedure
+                   JOIN pg_catalog.pg_namespace AS namespace
+                     ON namespace.oid = procedure.pronamespace
+                   WHERE namespace.nspname=%s AND procedure.proname=%s
+                     AND procedure.pronargs=2
+                     AND procedure.proargtypes='25 25'::oidvector""",
+                (schema_name, function_name),
+            )
+            row = cursor.fetchone()
+        connection.rollback()
+        return bool(row and row[0] and row[1])
+
     def _preflight_analyze_target(self, table, observation):
         repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
         if not repair_user or repair_user == self.config.DB_USER:
@@ -202,7 +224,15 @@ class RepairWorkflow:
             }
             if not audited_relations or audited_relations != current_relations:
                 raise ValueError("Audited table identity or data-node coverage changed; rerun the health audit")
-            self._require_analyze_ownership(stats["nodes"])
+            if not (
+                self.config.AIOPS_REPAIR_FUNCTION_ENABLED
+                and self._repair_function_available(
+                    connection,
+                    self.config.AIOPS_REPAIR_FUNCTION_SCHEMA,
+                    self.config.AIOPS_REPAIR_FUNCTION_NAME,
+                )
+            ):
+                self._require_analyze_ownership(stats["nodes"])
             stale_nodes = stale_statistics_nodes(stats["nodes"])
             if not stale_nodes:
                 raise ValueError("The original ANALYZE finding is no longer present")
@@ -400,11 +430,20 @@ class RepairWorkflow:
                             table.split(".", 1) if "." in table else ("public", table)
                         )
                         relation = sql.Identifier(schema_name, table_name)
-                        target.execute(
-                            sql.SQL("LOCK TABLE {} IN SHARE UPDATE EXCLUSIVE MODE").format(
-                                relation
+                        function_enabled = (
+                            self.config.AIOPS_REPAIR_FUNCTION_ENABLED
+                            and self._repair_function_available(
+                                conn,
+                                self.config.AIOPS_REPAIR_FUNCTION_SCHEMA,
+                                self.config.AIOPS_REPAIR_FUNCTION_NAME,
                             )
                         )
+                        if not function_enabled:
+                            target.execute(
+                                sql.SQL("LOCK TABLE {} IN SHARE UPDATE EXCLUSIVE MODE").format(
+                                    relation
+                                )
+                            )
                     stats_conn = stats_db.connect()
                     stats_conn.set_session(readonly=True, autocommit=False)
                     with stats_conn.cursor() as reader:
@@ -432,7 +471,8 @@ class RepairWorkflow:
                     }
                     if not audited_relations or audited_relations != current_relations:
                         raise ValueError("Audited table identity or data-node coverage changed; rerun the health audit")
-                    self._require_analyze_ownership(stats["nodes"])
+                    if not function_enabled:
+                        self._require_analyze_ownership(stats["nodes"])
                     with conn.cursor() as target:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
@@ -442,7 +482,16 @@ class RepairWorkflow:
                         execution_attempted = True
                         conn.notices.clear()
                         try:
-                            target.execute(sql.SQL("ANALYZE {}").format(relation))
+                            if function_enabled:
+                                target.execute(
+                                    sql.SQL("SELECT {}.{}(%s, %s)").format(
+                                        sql.Identifier(self.config.AIOPS_REPAIR_FUNCTION_SCHEMA),
+                                        sql.Identifier(self.config.AIOPS_REPAIR_FUNCTION_NAME),
+                                    ),
+                                    (schema_name, table_name),
+                                )
+                            else:
+                                target.execute(sql.SQL("ANALYZE {}").format(relation))
                         finally:
                             analyze_notices = [notice.strip() for notice in conn.notices]
                         skipped_objects = [
