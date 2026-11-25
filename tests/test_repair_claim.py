@@ -85,18 +85,34 @@ class RepairClaimTests(unittest.TestCase):
         connection = connector.connect.return_value
         cursor = connection.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = ("repair_operator", "postgres", False)
-        with patch("backend.engines.repair_workflow.OpenTenBaseConnector", return_value=connector), patch.object(
+        cursor.fetchall.return_value = [
+            ("dn0001", "dn1", 11006), ("dn0002", "dn2", 11006),
+        ]
+        node_connectors = [MagicMock(), MagicMock()]
+        for node_connector in node_connectors:
+            node_cursor = node_connector.connect.return_value.cursor.return_value.__enter__.return_value
+            node_cursor.fetchone.return_value = ("repair_operator", "postgres", False)
+        with patch(
+            "backend.engines.repair_workflow.OpenTenBaseConnector",
+            side_effect=[connector, *node_connectors],
+        ), patch.object(
             workflow, "_repair_function_available", return_value=True
         ), patch.object(
-            workflow, "_repair_target_allowed", side_effect=[True, False]
+            workflow, "_repair_target_allowed", side_effect=[True, True, True, True, True, False]
         ):
             readiness = workflow.readiness()
 
         self.assertTrue(readiness["executor_ready"])
         self.assertFalse(readiness["ready"])
         self.assertEqual(readiness["reason"], "targets_missing_from_database_allowlist")
-        self.assertEqual(readiness["targets"], {"public.orders": True, "public.items": False})
+        self.assertEqual(
+            readiness["targets"],
+            {"public.orders": {"coordinator": True, "data_nodes": {"dn0001": True, "dn0002": True}},
+             "public.items": {"coordinator": True, "data_nodes": {"dn0001": True, "dn0002": False}}},
+        )
         connector.close.assert_called_once()
+        for node_connector in node_connectors:
+            node_connector.close.assert_called_once()
 
     def test_readiness_stops_when_repair_account_is_not_configured(self):
         workflow = RepairWorkflow()

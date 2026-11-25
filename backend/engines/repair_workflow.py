@@ -218,6 +218,11 @@ class RepairWorkflow:
                     "(SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)"
                 )
                 identity = cursor.fetchone()
+                cursor.execute(
+                    "SELECT node_name, node_host, node_port FROM pgxc_node "
+                    "WHERE node_type='D' ORDER BY node_name"
+                )
+                data_nodes = cursor.fetchall()
             connection.rollback()
             if identity is None or identity[0] != repair_user or identity[2] is not False:
                 return {
@@ -235,24 +240,89 @@ class RepairWorkflow:
                     "executor_ready": False, "ready": False,
                     "reason": "repair_functions_missing_or_not_executable",
                 }
+            if not data_nodes:
+                return {
+                    "executor_ready": False, "ready": False,
+                    "reason": "no_data_nodes_registered",
+                }
             targets = {}
             for configured_target in self.config.AIOPS_AUTO_REPAIR_TARGETS:
                 schema_name, table_name = configured_target.split(".", 1)
-                targets[configured_target] = self._repair_target_allowed(
+                targets[configured_target] = {"coordinator": self._repair_target_allowed(
                     connection, schema, "is_analyze_target_allowed", schema_name, table_name
-                )
-            disallowed = [target for target, allowed in targets.items() if not allowed]
+                ), "data_nodes": {}}
+            node_status = {}
+            for node_name, node_host, node_port in data_nodes:
+                node_config = self._repair_config()
+                node_config.DB_HOST = node_host
+                node_config.DB_PORT = node_port
+                node_connector = OpenTenBaseConnector(node_config)
+                try:
+                    node_connection = node_connector.connect()
+                    node_connection.set_session(readonly=True, autocommit=False)
+                    with node_connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT session_user, current_database(), "
+                            "(SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)"
+                        )
+                        node_identity = cursor.fetchone()
+                    node_connection.rollback()
+                    node_functions_ready = bool(
+                        node_identity
+                        and node_identity[0] == repair_user
+                        and node_identity[1] == identity[1]
+                        and node_identity[2] is False
+                        and all(
+                            self._repair_function_available(node_connection, schema, name)
+                            for name in (analyze_function, "is_analyze_target_allowed")
+                        )
+                    )
+                    node_status[node_name] = {
+                        "connected": True,
+                        "functions_ready": node_functions_ready,
+                    }
+                    for configured_target in self.config.AIOPS_AUTO_REPAIR_TARGETS:
+                        schema_name, table_name = configured_target.split(".", 1)
+                        targets[configured_target]["data_nodes"][node_name] = (
+                            node_functions_ready
+                            and self._repair_target_allowed(
+                                node_connection, schema, "is_analyze_target_allowed",
+                                schema_name, table_name,
+                            )
+                        )
+                except Exception as error:
+                    node_status[node_name] = {
+                        "connected": False,
+                        "functions_ready": False,
+                        "error_type": type(error).__name__,
+                        "sqlstate": getattr(error, "pgcode", None),
+                    }
+                    for target in targets.values():
+                        target["data_nodes"][node_name] = False
+                finally:
+                    node_connector.close()
+            executor_ready = all(
+                node.get("connected") and node.get("functions_ready")
+                for node in node_status.values()
+            )
+            disallowed = [
+                target for target, checks in targets.items()
+                if not checks["coordinator"] or not all(checks["data_nodes"].values())
+            ]
             reason = None
             if not targets:
                 reason = "automatic_repair_targets_not_configured"
+            elif not executor_ready:
+                reason = "repair_function_not_ready_on_all_data_nodes"
             elif disallowed:
                 reason = "targets_missing_from_database_allowlist"
             return {
-                "executor_ready": True,
-                "ready": bool(targets) and not disallowed,
+                "executor_ready": executor_ready,
+                "ready": executor_ready and bool(targets) and not disallowed,
                 "database": identity[1],
                 "function": f"{schema}.{analyze_function}",
                 "targets": targets,
+                "data_nodes": node_status,
                 "reason": reason,
             }
         except Exception as error:
