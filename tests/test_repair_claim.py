@@ -3,9 +3,18 @@ from unittest.mock import MagicMock, patch
 
 from backend.engines.repair_workflow import RepairWorkflow
 from backend.security.permissions import ApprovalWorkflow
+from backend.app import capabilities
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_capabilities_declare_only_verified_repair_executor(self):
+        import asyncio
+        value = asyncio.run(capabilities())
+        repairs = value["repairs"]
+        self.assertEqual(repairs["verified_executors"], ["analyze_table"])
+        self.assertFalse(repairs["automatic_prepared_transaction_resolution"])
+        self.assertIn("kill_connection", repairs["suggestion_only"])
+
     def test_legacy_executor_never_reports_mock_success(self):
         workflow = ApprovalWorkflow.__new__(ApprovalWorkflow)
         result = workflow._execute_operation({
