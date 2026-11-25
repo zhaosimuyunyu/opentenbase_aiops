@@ -142,14 +142,14 @@ def main() -> int:
             }
         if not args.repair_account:
             try:
-                with connection.cursor() as cursor:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("SET LOCAL statement_timeout = '1500ms'")
                     cursor.execute("SET LOCAL lock_timeout = '300ms'")
                     cursor.execute(CHECKS["pg_clean_diagnostics"])
-                    available, executable = cursor.fetchone()
+                    diagnostics = dict(cursor.fetchone())
                 report["pg_clean_diagnostics"] = {
-                    "status": "registered" if available else "missing",
-                    "executable": executable,
+                    "status": "registered" if diagnostics["registered"] else "missing",
+                    **diagnostics,
                 }
             except psycopg2.Error as error:
                 report["pg_clean_diagnostics"] = {

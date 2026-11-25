@@ -20,7 +20,12 @@ def _collection_error(error):
 CHECKS = {
     "pg_clean_diagnostics": """
         SELECT function_oid IS NOT NULL AS registered,
-               pg_catalog.has_function_privilege(function_oid, 'EXECUTE') AS executable
+               pg_catalog.has_function_privilege(function_oid, 'EXECUTE') AS executable,
+               EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions
+                       WHERE name = 'pg_clean') AS package_available,
+               (SELECT extversion FROM pg_catalog.pg_extension
+                WHERE extname = 'pg_clean') AS installed_version,
+               pg_catalog.current_setting('enable_clean_2pc_launcher', true) AS launcher_setting
         FROM (SELECT pg_catalog.to_regprocedure('public.pg_clean_check_txn(integer)')::oid
                      AS function_oid) AS diagnostic
     """,
