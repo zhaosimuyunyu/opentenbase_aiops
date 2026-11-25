@@ -341,13 +341,14 @@ class ApprovalWorkflow:
         start_time = datetime.now()
 
         try:
-            # TODO: Implement actual operation execution
-            # For now, return mock success
+            # This legacy registry has no database executor. Never report a
+            # simulated success as a real change. The production repair API
+            # uses RepairWorkflow with operation-specific verification.
             result = {
-                'success': True,
+                'success': False,
                 'operation': operation,
                 'parameters': parameters,
-                'message': f"Operation {operation} executed successfully"
+                'error': 'No operation executor is registered for this legacy workflow'
             }
 
             execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
