@@ -1,10 +1,15 @@
+import importlib.util
 import unittest
 from unittest.mock import MagicMock, patch
 
-from backend.app import get_automation_status
 
-
+@unittest.skipUnless(importlib.util.find_spec("fastapi"), "FastAPI is available in the API runtime")
 class AutomationStatusTests(unittest.TestCase):
+    @staticmethod
+    def _get_status():
+        from backend.app import get_automation_status
+        return get_automation_status()
+
     def test_reports_enabled_auto_repair_configuration_without_audit_tables(self):
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value
@@ -26,7 +31,7 @@ class AutomationStatusTests(unittest.TestCase):
             AIOPS_REPAIR_FUNCTION_SCHEMA="aiops_admin",
             AIOPS_REPAIR_FUNCTION_NAME="analyze_table",
         ):
-            status = get_automation_status()
+            status = self._get_status()
 
         self.assertTrue(status["repair_executor_ready"])
         self.assertTrue(status["automatic_repair_enabled"])
@@ -57,7 +62,7 @@ class AutomationStatusTests(unittest.TestCase):
             AIOPS_REPAIR_FUNCTION_SCHEMA="aiops_admin",
             AIOPS_REPAIR_FUNCTION_NAME="analyze_table",
         ):
-            status = get_automation_status()
+            status = self._get_status()
 
         self.assertFalse(status["repair_executor_ready"])
         self.assertFalse(status["automatic_repair_enabled"])
