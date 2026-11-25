@@ -12,6 +12,7 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertLessEqual(DistributedCollector.ALLOWED_CHECKS, set(CHECKS))
         self.assertIn("key_guc", CHECKS)
         self.assertIn("storage", CHECKS)
+        self.assertIn("data_node_lock_blockers", CHECKS)
 
     def test_distributed_collect_rejects_arbitrary_sql(self):
         collector = DistributedCollector(SimpleNamespace())
@@ -79,6 +80,8 @@ class NodeConnectivityTests(unittest.TestCase):
             collector, "_probe_node_connectivity", return_value=[]
         ), patch.object(
             collector, "_collect_data_node_prepared_xacts", return_value=([], {})
+        ), patch.object(
+            collector, "_collect_data_node_lock_blockers", return_value=([], {})
         ), patch.object(
             collector, "_collect_data_node_stats", side_effect=[([], limits), (targeted, {})]
         ) as stats:

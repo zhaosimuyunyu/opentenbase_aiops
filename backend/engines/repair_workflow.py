@@ -16,7 +16,7 @@ from ..utils.db_connector import OpenTenBaseConnector
 from ..utils.operations_store import OperationsStore
 
 
-ALLOWED_OPERATIONS = {"analyze_table"}
+ALLOWED_OPERATIONS = {"analyze_table", "cancel_query"}
 
 
 def _table_name(value):
@@ -342,6 +342,43 @@ class RepairWorkflow:
         repair_config.DB_PASSWORD = self.config.AIOPS_REPAIR_DB_PASSWORD
         return repair_config
 
+    @staticmethod
+    def _lock_target(parameters, finding):
+        observation = finding.get("evidence") or {}
+        database_identity = observation.get("database_identity") or {}
+        waits = observation.get("waits") or []
+        candidates = [
+            blocker
+            for waiting_lock in waits
+            for blocker in waiting_lock.get("blockers") or []
+        ]
+        expected_keys = (
+            "node_name", "pid", "database", "usename", "application_name",
+            "query_start", "xact_start", "query",
+        )
+        expected = next((
+            {
+                **{key: blocker.get(key) for key in expected_keys if key != "usename"},
+                "user": blocker.get("usename"),
+                "database_identity": database_identity,
+            }
+            for blocker in candidates
+            if all(blocker.get(key) == parameters.get(
+                "user" if key == "usename" else key
+            ) for key in expected_keys)
+        ), None)
+        if (finding.get("check") != "data_node_lock_waits" or expected is None
+                or not database_identity.get("system_identifier")
+                or not database_identity.get("database")):
+            raise ValueError("Query cancellation requires complete blocker identity from a lock finding")
+        if not isinstance(expected["pid"], int) or expected["pid"] <= 0:
+            raise ValueError("Query cancellation target must exactly match the audited blocker identity")
+        if parameters != expected:
+            raise ValueError("Query cancellation target must exactly match the audited blocker identity")
+        if not expected["query"] or not expected["query"].strip():
+            raise ValueError("Query cancellation is unavailable for an empty or internal query")
+        return expected
+
     def _preflight_analyze_target(self, table, observation):
         repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
         if not repair_user or repair_user == self.config.DB_USER:
@@ -408,23 +445,38 @@ class RepairWorkflow:
     def create_request(self, operation, parameters, evidence, reason, audit_id=None, finding=None):
         if operation not in ALLOWED_OPERATIONS:
             raise ValueError("Operation is not enabled for execution")
-        if operation == "analyze_table" and (not audit_id or not finding):
-            raise ValueError("ANALYZE requests must reference a persisted audit finding")
+        if not audit_id or not finding:
+            raise ValueError("Repair requests must reference a persisted audit finding")
         params = dict(parameters or {})
-        params["table"] = _table_name(params.get("table"))
-        observation = finding.get("evidence") or {}
-        if finding.get("check") != "stale_table_statistics" or not has_repair_identity(observation):
-            raise ValueError("Repair requires a verified table statistics finding")
-        if params["table"] != f"{observation.get('schema')}.{observation.get('table')}":
-            raise ValueError("Repair target does not match the audited finding")
-        self._preflight_analyze_target(params["table"], observation)
-        lookup = """
-            SELECT request_id,status,parameters,finding,evidence
-            FROM repair_requests
-            WHERE audit_id=%s AND operation=%s AND parameters->>'table'=%s
-            ORDER BY created_at DESC,request_id DESC LIMIT 1
-        """
-        lookup_parameters = (audit_id, operation, params["table"])
+        if operation == "analyze_table":
+            params["table"] = _table_name(params.get("table"))
+            observation = finding.get("evidence") or {}
+            if finding.get("check") != "stale_table_statistics" or not has_repair_identity(observation):
+                raise ValueError("Repair requires a verified table statistics finding")
+            if params["table"] != f"{observation.get('schema')}.{observation.get('table')}":
+                raise ValueError("Repair target does not match the audited finding")
+            self._preflight_analyze_target(params["table"], observation)
+        elif operation == "cancel_query":
+            params = self._lock_target(params, finding)
+        else:
+            raise ValueError("Operation is not enabled for execution")
+        if operation == "analyze_table":
+            lookup = """
+                SELECT request_id,status,parameters,finding,evidence
+                FROM repair_requests
+                WHERE audit_id=%s AND operation=%s AND parameters->>'table'=%s
+                ORDER BY created_at DESC,request_id DESC LIMIT 1
+            """
+            lookup_parameters = (audit_id, operation, params["table"])
+        else:
+            lookup = """
+                SELECT request_id,status,parameters,finding,evidence
+                FROM repair_requests
+                WHERE audit_id=%s AND operation=%s
+                  AND parameters->>'node_name'=%s AND parameters->>'pid'=%s
+                ORDER BY created_at DESC,request_id DESC LIMIT 1
+            """
+            lookup_parameters = (audit_id, operation, params["node_name"], str(params["pid"]))
         kb = OperationsStore()
         try:
             self._ensure_schema(kb)
@@ -636,6 +688,12 @@ class RepairWorkflow:
                 if ((reviews.get("human_approval") or {}).get("proposal_fingerprint")
                         and (reviews.get("human_approval") or {}).get("proposal_fingerprint") != fingerprint):
                     raise ValueError("Human approval does not match the current proposal")
+                if operation == "cancel_query":
+                    self._lock_target(params, finding)
+                    raise ValueError(
+                        "cancel_query requires a verified per-data-node cancellation executor; "
+                        "the proposal is retained for review"
+                    )
                 table = _table_name(params["table"])
                 if operation != "analyze_table" or not audit_id or not finding:
                     raise ValueError("Repair request must reference a persisted audit finding")

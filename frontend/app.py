@@ -292,6 +292,56 @@ def render_repair_proposal(api_base, audit_id, findings):
             else:
                 st.error(response.text)
 
+    lock_candidates = []
+    for finding_index, finding in enumerate(findings):
+        if finding.get("check") != "data_node_lock_waits":
+            continue
+        evidence = finding.get("evidence") or {}
+        for waiting_lock in evidence.get("waits") or []:
+            for blocker in waiting_lock.get("blockers") or []:
+                if all(blocker.get(key) for key in (
+                    "node_name", "pid", "database", "usename", "query_start", "query",
+                )) and evidence.get("database_identity", {}).get("system_identifier"):
+                    parameters = {
+                        key: blocker.get(key) for key in (
+                            "node_name", "pid", "database", "application_name",
+                            "query_start", "xact_start", "query",
+                        )
+                    }
+                    parameters["user"] = blocker.get("usename")
+                    parameters["database_identity"] = evidence["database_identity"]
+                    lock_candidates.append((finding_index, blocker, parameters))
+    if lock_candidates:
+        selected = st.selectbox(
+            "生成阻塞查询处置建议",
+            range(len(lock_candidates)),
+            format_func=lambda index: (
+                f"{lock_candidates[index][1]['node_name']} · PID "
+                f"{lock_candidates[index][1]['pid']} · {lock_candidates[index][1]['database']} · "
+                f"{lock_candidates[index][1]['query'][:100]}"
+            ),
+            key=f"cancel-query-finding-{audit_id}",
+        )
+        finding_index, blocker, parameters = lock_candidates[selected]
+        st.info("取消查询属于高风险操作。当前仅创建人工审核建议，执行器尚未通过分布式身份与权限验证。")
+        reason = st.text_input(
+            "处置原因", value="该会话在数据节点持有锁并阻塞其他事务。",
+            key=f"cancel-query-reason-{audit_id}",
+        )
+        if st.button("创建取消查询审核建议", key=f"create-cancel-query-{audit_id}"):
+            response = requests.post(
+                f"{api_base}/api/audits/{audit_id}/repair-requests",
+                json={
+                    "finding_index": finding_index, "reason": reason,
+                    "operation": "cancel_query", "parameters": parameters,
+                },
+                timeout=st.session_state.config.AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS,
+            )
+            if response.ok:
+                st.success(f"审核建议已创建: {response.json()['request_id']}")
+            else:
+                st.error(response.text)
+
 
 # Main content
 if page == "📊 健康监控":
@@ -583,6 +633,7 @@ elif page == "🧾 修复审批":
                 risk_policy = proposal_evidence.get("risk_policy") or {}
                 human_approval = proposal_evidence.get("human_approval") or {}
                 requires_human = risk_policy.get("requires_human_approval", True)
+                suggestion_only = item.get("operation") == "cancel_query"
                 if risk_policy:
                     risk_name = {"low": "低风险", "moderate": "中风险", "high": "高风险", "unknown": "未知风险"}.get(
                         risk_policy.get("risk_level"), "未知风险"
@@ -591,8 +642,10 @@ elif page == "🧾 修复审批":
                 ready = not requires_human or human_approval.get("approved") is True
                 if requires_human and not ready:
                     st.warning("此操作需要人工批准后执行")
-                elif ready:
+                elif ready and not suggestion_only:
                     st.success("风险策略满足，可执行")
+                if suggestion_only:
+                    st.warning("当前为建议模式。逐 DN 取消执行器尚未启用，批准不会执行数据库操作。")
                 if proposal_evidence.get("proposal_source") == "stale_table_statistics":
                     st.caption("提案来源 · 表统计过时巡检规则")
                 stale_nodes = (proposal_evidence.get("observation") or {}).get("stale_nodes") or []
@@ -654,7 +707,7 @@ elif page == "🧾 修复审批":
                             if response.ok:
                                 st.rerun()
                             st.error(response.text)
-                if item["status"] == "pending":
+                if item["status"] == "pending" and not suggestion_only:
                     approver = st.session_state.config.AIOPS_APPROVER_ID
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)

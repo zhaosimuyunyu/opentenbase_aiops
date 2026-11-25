@@ -88,6 +88,8 @@ CHECKS = {
         SELECT l.locktype, l.relation::text AS relation, l.mode, l.granted,
                l.pid, l.transactionid::text AS transactionid,
                COALESCE(a.usename, '') AS usename,
+               COALESCE(a.datname, '') AS database,
+               COALESCE(a.application_name, '') AS application_name,
                a.state, a.wait_event_type, a.wait_event,
                a.xact_start, a.query_start, COALESCE(a.query, '') AS query,
                CASE WHEN NOT l.granted THEN array_remove(pg_blocking_pids(l.pid), 0)
@@ -95,6 +97,25 @@ CHECKS = {
         FROM pg_locks l
         LEFT JOIN pg_stat_activity a ON a.pid = l.pid
         WHERE l.pid IS NOT NULL OR l.granted
+    """,
+    "data_node_lock_blockers": """
+        WITH waiting AS (
+            SELECT DISTINCT l.pid AS waiting_pid, l.locktype,
+                   l.relation::text AS relation, l.transactionid::text AS transactionid,
+                   l.mode AS waiting_mode,
+                   unnest(pg_catalog.pg_blocking_pids(l.pid)) AS blocker_pid
+            FROM pg_catalog.pg_locks l
+            WHERE NOT l.granted AND l.pid IS NOT NULL
+        )
+        SELECT w.waiting_pid, w.locktype, w.relation, w.transactionid, w.waiting_mode,
+               a.pid, COALESCE(a.usename, '') AS usename,
+               COALESCE(a.datname, '') AS database,
+               COALESCE(a.application_name, '') AS application_name,
+               a.state, a.xact_start, a.query_start, COALESCE(a.query, '') AS query,
+               a.backend_type
+        FROM waiting w
+        JOIN pg_catalog.pg_stat_activity a ON a.pid = w.blocker_pid
+        WHERE a.backend_type = 'client backend'
     """,
     "long_running_queries": """
         SELECT pid, usename, datname, state, query, query_start,
@@ -200,6 +221,9 @@ class ReadonlyHealthCollector:
                             "message": node["error"] or "Node endpoint is unavailable",
                         }
             if any(node.get("node_type") == "D" for node in nodes):
+                blocker_rows, blocker_errors = self._collect_data_node_lock_blockers(connection, nodes)
+                results["data_node_lock_blockers"] = blocker_rows
+                errors.update(blocker_errors)
                 node_stats, node_stats_errors = self._collect_data_node_stats(
                     connection, nodes, table=table
                 )
@@ -371,3 +395,26 @@ class ReadonlyHealthCollector:
                 connection.rollback()
                 errors[f"data_node_prepared_transactions:{name}"] = _collection_error(error)
         return transactions, errors
+
+    def _collect_data_node_lock_blockers(self, connection, nodes):
+        blockers = []
+        errors = {}
+        for node in nodes:
+            if node.get("node_type") != "D":
+                continue
+            name = node.get("node_name")
+            try:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    self._set_query_timeouts(cursor)
+                    cursor.execute(
+                        sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
+                        (CHECKS["data_node_lock_blockers"],),
+                    )
+                    blockers.extend(
+                        {"node_name": name, **dict(row)} for row in cursor.fetchall()
+                    )
+                connection.rollback()
+            except Exception as error:
+                connection.rollback()
+                errors[f"data_node_lock_blockers:{name}"] = _collection_error(error)
+        return blockers, errors

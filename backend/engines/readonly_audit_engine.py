@@ -138,6 +138,28 @@ class ReadonlyAuditEngine:
                 'observed': f'{len(blocked_locks)} waiting locks',
                 'evidence': blocked_locks,
             })
+        data_node_waits = checks.get('data_node_lock_blockers') or []
+        if data_node_waits:
+            waits_by_node = {}
+            for row in data_node_waits:
+                blocker = {key: value for key, value in row.items() if key not in {
+                    'waiting_pid', 'locktype', 'relation', 'transactionid', 'waiting_mode',
+                }}
+                wait = waits_by_node.setdefault((row['node_name'], row['waiting_pid']), {
+                    'node_name': row['node_name'], 'waiting_pid': row['waiting_pid'],
+                    'locktype': row['locktype'], 'relation': row['relation'],
+                    'transactionid': row['transactionid'], 'waiting_mode': row['waiting_mode'],
+                    'blockers': [],
+                })
+                wait['blockers'].append(blocker)
+            findings.append({
+                'check': 'data_node_lock_waits', 'severity': 'high',
+                'observed': f'{len(data_node_waits)} data-node lock wait relationships',
+                'evidence': {
+                    'waits': list(waits_by_node.values()),
+                    'database_identity': (checks.get('database_identity') or [{}])[0],
+                },
+            })
         if 'pg_unlock_diagnostics' in checks and (
             blocked_locks or checks.get('prepared_transactions')
             or checks.get('data_node_prepared_transactions')
@@ -336,7 +358,7 @@ class ReadonlyAuditEngine:
         cluster_checks = {
             'nodes', 'connections', 'max_connections', 'replication',
             'database_info', 'database_identity', 'prepared_transactions', 'pg_clean_diagnostics',
-            'pg_unlock_diagnostics', 'key_guc',
+                    'pg_unlock_diagnostics', 'data_node_lock_blockers', 'key_guc',
         }
         performance_checks = {
             'locks', 'long_running_queries', 'idle_transactions',

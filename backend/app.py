@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from .utils.config import Config
 from .utils.db_connector import OpenTenBaseConnector
@@ -107,6 +107,8 @@ class RepairRejectionRequest(BaseModel):
 class RepairProposalRequest(BaseModel):
     reason: str
     finding_index: int = Field(ge=0)
+    operation: Literal["analyze_table", "cancel_query"] = "analyze_table"
+    parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AlertmanagerRequest(BaseModel):
@@ -641,7 +643,7 @@ async def reanalyze_audit(audit_id: str):
 
 @app.post("/api/audits/{audit_id}/repair-requests")
 def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
-    """Create an ANALYZE proposal from a persisted statistics finding."""
+    """Create a supported repair proposal from a persisted audit finding."""
     kb = None
     try:
         kb = OperationsStore()
@@ -659,23 +661,31 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
         audit_evidence = record["evidence"] or {}
         findings = audit_evidence.get("findings", [])
         finding = findings[request.finding_index] if request.finding_index < len(findings) else {}
-        if finding.get("check") != "stale_table_statistics":
-            raise HTTPException(status_code=400, detail="Selected audit finding is not eligible for ANALYZE")
-        evidence = finding["evidence"]
-        if not has_repair_identity(evidence):
-            raise HTTPException(status_code=400, detail="Audited database or table identity is missing; rerun the health audit")
-        table = f"{evidence['schema']}.{evidence['table']}"
-        if any(name.startswith("data_node_stats:") for name in audit_evidence.get("collection_errors", {})):
-            fallback = (audit_evidence.get("performance") or {}).get("data_node_stats_fallback") or {}
-            entry = fallback.get(table) or {}
-            if evidence.get("statistics_source") != "fallback" or entry.get("errors") != {} or not any(
-                row.get("nodes") == evidence["nodes"] for row in entry.get("tables", [])
-            ):
-                raise HTTPException(status_code=400, detail="Data-node statistics are incomplete; rerun the health audit")
+        evidence = finding.get("evidence") or {}
+        if request.operation == "analyze_table":
+            if finding.get("check") != "stale_table_statistics":
+                raise HTTPException(status_code=400, detail="Selected audit finding is not eligible for ANALYZE")
+            if not has_repair_identity(evidence):
+                raise HTTPException(status_code=400, detail="Audited database or table identity is missing; rerun the health audit")
+            table = f"{evidence['schema']}.{evidence['table']}"
+            if any(name.startswith("data_node_stats:") for name in audit_evidence.get("collection_errors", {})):
+                fallback = (audit_evidence.get("performance") or {}).get("data_node_stats_fallback") or {}
+                entry = fallback.get(table) or {}
+                if evidence.get("statistics_source") != "fallback" or entry.get("errors") != {} or not any(
+                    row.get("nodes") == evidence["nodes"] for row in entry.get("tables", [])
+                ):
+                    raise HTTPException(status_code=400, detail="Data-node statistics are incomplete; rerun the health audit")
+            parameters = {"table": table}
+        elif request.operation == "cancel_query":
+            if finding.get("check") != "data_node_lock_waits":
+                raise HTTPException(status_code=400, detail="Selected audit finding has no per-data-node blocker identity")
+            parameters = request.parameters
+        else:
+            raise HTTPException(status_code=400, detail="Operation is not enabled for execution")
         return RepairWorkflow().create_request(
-            "analyze_table", {"table": table},
+            request.operation, parameters,
             {
-                "proposal_source": "stale_table_statistics",
+                "proposal_source": request.operation,
                 "observation": evidence,
                 "review_context": {
                     "collection_status": audit_evidence.get("collection_status"),

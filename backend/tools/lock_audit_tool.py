@@ -8,6 +8,7 @@ async def execute_get_database_locks(include_granted: bool = True):
         SELECT l.locktype, l.relation::text AS relation, l.mode, l.granted, l.pid,
                l.transactionid::text AS transactionid, l.virtualxid::text AS virtualxid,
                COALESCE(a.usename, '') AS usename,
+               COALESCE(a.datname, '') AS database,
                COALESCE(a.application_name, '') AS application_name,
                a.state, a.wait_event_type, a.wait_event, a.xact_start, a.query_start,
                COALESCE(a.query, '') AS query,

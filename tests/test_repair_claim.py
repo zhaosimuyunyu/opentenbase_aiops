@@ -426,6 +426,68 @@ class RepairClaimTests(unittest.TestCase):
         self.assertEqual(policy["risk_level"], "high")
         self.assertEqual(policy["matched_keyword"].lower(), "drop")
 
+    def test_cancel_query_proposal_binds_complete_blocker_identity(self):
+        target = {
+            "node_name": "dn0001", "pid": 123, "database": "appdb",
+            "user": "app", "application_name": "worker", "query_start": "2026-01-01T00:00:00Z",
+            "xact_start": "2026-01-01T00:00:00Z", "query": "UPDATE public.items SET value=1",
+            "database_identity": {"system_identifier": "sys-1", "database": "postgres"},
+        }
+        blocker = {"node_name": target["node_name"], "pid": target["pid"],
+                   "database": target["database"], "usename": target["user"],
+                   "application_name": target["application_name"],
+                   "query_start": target["query_start"], "xact_start": target["xact_start"],
+                   "query": target["query"]}
+        finding = {"check": "data_node_lock_waits", "evidence": {
+            "waits": [{"node_name": "dn0001", "waiting_pid": 200, "blockers": [blocker]}],
+            "database_identity": target["database_identity"],
+        }}
+        self.assertEqual(RepairWorkflow._lock_target(target, finding), target)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            RepairWorkflow._lock_target({**target, "pid": 124}, finding)
+        with self.assertRaisesRegex(ValueError, "complete blocker identity"):
+            RepairWorkflow._lock_target(target, {"check": "lock_waits", "evidence": {"pid": 123}})
+        self.assertTrue(OperationRegistry.classify("cancel_query")["requires_human_approval"])
+
+    def test_cancel_query_execution_fails_closed_after_human_approval(self):
+        workflow = RepairWorkflow()
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        target = {
+            "node_name": "dn0001", "pid": 123, "database": "appdb", "user": "app",
+            "application_name": "worker", "query_start": "2026-01-01T00:00:00Z",
+            "xact_start": "2026-01-01T00:00:00Z", "query": "UPDATE public.items SET value=1",
+            "database_identity": {"system_identifier": "sys-1", "database": "postgres"},
+        }
+        blocker = {"node_name": target["node_name"], "pid": target["pid"],
+                   "database": target["database"], "usename": target["user"],
+                   "application_name": target["application_name"],
+                   "query_start": target["query_start"], "xact_start": target["xact_start"],
+                   "query": target["query"]}
+        finding = {"check": "data_node_lock_waits", "evidence": {
+            "waits": [{"node_name": "dn0001", "waiting_pid": 200, "blockers": [blocker]}],
+            "database_identity": target["database_identity"],
+        }}
+        cursor.fetchone.return_value = (
+            "cancel_query", target, "pending", "audit-1", finding, {
+                "risk_policy": {"proposal_fingerprint": _proposal_fingerprint(
+                    "cancel_query", target, "audit-1", finding
+                )},
+                "human_approval": {"approved": True},
+            },
+        )
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token",
+            AIOPS_APPROVER_ID="operator", AIOPS_REPAIR_DB_USER="repair",
+            DB_USER="auditor",
+        )
+        with patch.object(workflow, "_ensure_schema"), patch(
+            "backend.engines.repair_workflow.OperationsStore", return_value=store
+        ):
+            with self.assertRaisesRegex(ValueError, "executor"):
+                workflow.approve_and_execute("request-1", "operator", "test-token")
+        store.close.assert_called_once()
+
     def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token")
