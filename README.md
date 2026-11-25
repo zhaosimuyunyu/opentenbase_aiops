@@ -145,6 +145,10 @@ opentenbase-aiops/
 `AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。
 | `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的普通执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |
 | `AIOPS_REPAIR_DB_PASSWORD` | 独立执行账号的密码 | 空 |
+| `AIOPS_AUTO_REPAIR_ENABLED` | 是否允许周期巡检触发自动 `ANALYZE` | `false` |
+| `AIOPS_AUTO_REPAIR_TARGETS` | 自动修复目标，必须是显式白名单中的 schema.table | 空 |
+
+自动修复只处理周期巡检中唯一的 `stale_table_statistics` 发现。采集必须完整，目标必须同时通过应用配置和数据库管理员函数白名单，执行前会写入 `automatic_policy` 事件，执行后仍按各 DN 的统计时间戳验证。告警触发和手工巡检不会自动写库。
 
 OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。配置独立执行账号后，由该账号获取表锁并执行 `ANALYZE`，巡检账号通过单独的只读连接完成执行前和执行后的逐 DN 统计检查。两条连接必须指向同一集群和数据库。
 

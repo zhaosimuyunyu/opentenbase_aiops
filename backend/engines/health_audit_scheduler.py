@@ -6,6 +6,7 @@ from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
 from ..utils.logger import setup_logger
 from .readonly_audit_engine import ReadonlyAuditEngine
+from .repair_workflow import RepairWorkflow
 
 
 logger = setup_logger(__name__)
@@ -93,6 +94,32 @@ class HealthAuditScheduler:
                     result = await self.run_once(scheduled=True, table=table)
                     if result:
                         logger.info("Scheduled health audit persisted as %s", result["audit_id"])
+                        if self.config.AIOPS_AUTO_REPAIR_ENABLED:
+                            try:
+                                repair = await run_in_threadpool(
+                                    RepairWorkflow(self.config).auto_repair_from_audit,
+                                    result["audit_id"],
+                                )
+                            except Exception as error:
+                                repair = {
+                                    "status": "error",
+                                    "error_type": type(error).__name__,
+                                }
+                                logger.exception(
+                                    "Scheduled automatic repair failed for audit %s",
+                                    result["audit_id"],
+                                )
+                            try:
+                                self._persist_auto_repair_result(result["audit_id"], repair)
+                                logger.info(
+                                    "Scheduled automatic repair finished for %s: %s",
+                                    result["audit_id"], repair.get("status"),
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Could not persist automatic repair result for audit %s",
+                                    result["audit_id"],
+                                )
                     else:
                         delay = min(delay, 30)
                 except asyncio.CancelledError:
@@ -101,3 +128,19 @@ class HealthAuditScheduler:
                     logger.exception("Scheduled health audit failed for %s", table)
                     delay = min(delay, 60)
             await asyncio.sleep(delay)
+
+    @staticmethod
+    def _persist_auto_repair_result(audit_id, result):
+        store = OperationsStore()
+        try:
+            with store.conn, store.conn.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE audit_records
+                       SET evidence=jsonb_set(
+                           COALESCE(evidence, '{}'::jsonb),
+                           '{automatic_repair}', %s::jsonb, true)
+                       WHERE audit_id=%s""",
+                    (Json(result), audit_id),
+                )
+        finally:
+            store.close()

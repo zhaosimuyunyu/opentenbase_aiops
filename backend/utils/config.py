@@ -26,6 +26,17 @@ class Config:
     )
     AIOPS_REPAIR_FUNCTION_SCHEMA: str = os.getenv("AIOPS_REPAIR_FUNCTION_SCHEMA", "aiops_admin")
     AIOPS_REPAIR_FUNCTION_NAME: str = os.getenv("AIOPS_REPAIR_FUNCTION_NAME", "analyze_table")
+    AIOPS_AUTO_REPAIR_ENABLED: bool = (
+        os.getenv("AIOPS_AUTO_REPAIR_ENABLED", "false").lower()
+        in {"1", "true", "yes", "on"}
+    )
+    AIOPS_AUTO_REPAIR_TARGETS = tuple(dict.fromkeys(
+        part.strip() for part in os.getenv("AIOPS_AUTO_REPAIR_TARGETS", "").split(",")
+        if part.strip()
+    ))
+    for target in AIOPS_AUTO_REPAIR_TARGETS:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", target):
+            raise ValueError("AIOPS_AUTO_REPAIR_TARGETS must contain comma-separated schema.table names")
 
     @property
     def audit_target(self):
@@ -80,6 +91,13 @@ class Config:
             r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", target
         ):
             raise ValueError("AIOPS_AUTO_AUDIT_TABLE must contain comma-separated schema.table names")
+    if AIOPS_AUTO_REPAIR_ENABLED:
+        if not AIOPS_AUTO_REPAIR_TARGETS:
+            raise ValueError("AIOPS_AUTO_REPAIR_TARGETS is required when automatic repair is enabled")
+        if not AIOPS_REPAIR_FUNCTION_ENABLED:
+            raise ValueError("Automatic repair requires the administrator repair function")
+        if not AIOPS_REPAIR_DB_USER or AIOPS_REPAIR_DB_USER == DB_USER:
+            raise ValueError("Automatic repair requires a separate non-superuser repair account")
 
     # Vector Store
     CHROMA_PERSIST_DIRECTORY: str = os.getenv(

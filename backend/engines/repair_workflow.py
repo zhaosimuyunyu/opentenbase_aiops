@@ -44,8 +44,8 @@ def _proposal_fingerprint(operation, parameters, audit_id, finding):
 
 
 class RepairWorkflow:
-    def __init__(self):
-        self.config = Config()
+    def __init__(self, config=None):
+        self.config = config or Config()
 
     def _ensure_schema(self, kb):
         with kb.conn, kb.conn.cursor() as cur:
@@ -183,6 +183,19 @@ class RepairWorkflow:
         connection.rollback()
         return bool(row and row[0] and row[1])
 
+    @staticmethod
+    def _repair_target_allowed(connection, schema_name, function_name, target_schema, target_table):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("SELECT {}.{}(%s, %s)").format(
+                    sql.Identifier(schema_name), sql.Identifier(function_name),
+                ),
+                (target_schema, target_table),
+            )
+            allowed = cursor.fetchone()[0]
+        connection.rollback()
+        return allowed is True
+
     def _preflight_analyze_target(self, table, observation):
         repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
         if not repair_user or repair_user == self.config.DB_USER:
@@ -224,15 +237,24 @@ class RepairWorkflow:
             }
             if not audited_relations or audited_relations != current_relations:
                 raise ValueError("Audited table identity or data-node coverage changed; rerun the health audit")
-            if not (
+            function_enabled = (
                 self.config.AIOPS_REPAIR_FUNCTION_ENABLED
                 and self._repair_function_available(
                     connection,
                     self.config.AIOPS_REPAIR_FUNCTION_SCHEMA,
                     self.config.AIOPS_REPAIR_FUNCTION_NAME,
                 )
-            ):
+            )
+            if not function_enabled:
                 self._require_analyze_ownership(stats["nodes"])
+            elif not self._repair_target_allowed(
+                connection,
+                self.config.AIOPS_REPAIR_FUNCTION_SCHEMA,
+                "is_analyze_target_allowed",
+                schema_name,
+                table_name,
+            ):
+                raise ValueError("Repair target is not present in the administrator allowlist")
             stale_nodes = stale_statistics_nodes(stats["nodes"])
             if not stale_nodes:
                 raise ValueError("The original ANALYZE finding is no longer present")
@@ -341,8 +363,91 @@ class RepairWorkflow:
             raise PermissionError("Approval token is not configured or is invalid")
         return self.config.AIOPS_APPROVER_ID
 
-    def approve_and_execute(self, request_id, approver, token):
-        approver = self._authorize_decision(token)
+    def auto_repair_from_audit(self, audit_id):
+        """Execute only an allowlisted statistics repair from a complete audit."""
+        if not self.config.AIOPS_AUTO_REPAIR_ENABLED:
+            return {"status": "skipped", "reason": "automatic_repair_disabled"}
+        if not self.config.AIOPS_REPAIR_FUNCTION_ENABLED:
+            return {"status": "skipped", "reason": "administrator_repair_function_disabled"}
+        if not self.config.AIOPS_REPAIR_DB_USER or self.config.AIOPS_REPAIR_DB_USER == self.config.DB_USER:
+            return {"status": "skipped", "reason": "separate_repair_account_not_configured"}
+        kb = OperationsStore()
+        try:
+            self._ensure_schema(kb)
+            with kb.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT evidence, ai_analysis, knowledge_refs FROM audit_records WHERE audit_id=%s",
+                    (audit_id,),
+                )
+                record = cur.fetchone()
+            if not record:
+                raise ValueError("Audit not found")
+            evidence = record[0] or {}
+            if evidence.get("trigger") != "scheduled":
+                return {"status": "skipped", "reason": "audit_was_not_scheduled"}
+            if evidence.get("collection_status") != "success" or evidence.get("performance_status") != "success":
+                return {"status": "skipped", "reason": "health_collection_incomplete"}
+            findings = evidence.get("findings") or []
+            candidates = [item for item in findings if item.get("check") == "stale_table_statistics"]
+            if len(findings) != 1 or len(candidates) != 1:
+                return {"status": "skipped", "reason": "audit_did_not_have_one_isolated_stale_statistics_finding"}
+            finding = candidates[0]
+            observed = finding.get("evidence") or {}
+            table = f"{observed.get('schema')}.{observed.get('table')}"
+            if table not in self.config.AIOPS_AUTO_REPAIR_TARGETS:
+                return {"status": "skipped", "reason": "target_not_configured_for_automatic_repair",
+                        "target": table}
+            request = self.create_request(
+                "analyze_table", {"table": table},
+                {"proposal_source": "scheduled_auto_repair", "observation": observed,
+                 "ai_analysis": record[1], "knowledge_refs": record[2] or []},
+                "Scheduled automatic repair for a complete stale-statistics audit",
+                audit_id, finding,
+            )
+        finally:
+            kb.close()
+        if request.get("status") != "pending":
+            return {"status": "skipped", "reason": "repair_request_already_processed",
+                    "request_id": request["request_id"]}
+        request_id = request["request_id"]
+        kb = OperationsStore()
+        try:
+            self._ensure_schema(kb)
+            with kb.conn, kb.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT operation,parameters,status,audit_id,finding,evidence FROM repair_requests WHERE request_id=%s FOR UPDATE",
+                    (request_id,),
+                )
+                row = cur.fetchone()
+                if not row or row[2] != "pending":
+                    raise ValueError("Automatic repair request is missing or no longer pending")
+                operation, parameters, _, stored_audit, stored_finding, stored_evidence = row
+                fingerprint = _proposal_fingerprint(operation, parameters, stored_audit, stored_finding)
+                stored_evidence["automatic_policy"] = {
+                    "approved": True, "actor": "aiops-auto-policy",
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                    "proposal_fingerprint": fingerprint,
+                    "policy": "scheduled_single_finding_complete_collection_allowlisted_analyze_v1",
+                }
+                cur.execute("UPDATE repair_requests SET evidence=%s WHERE request_id=%s AND status='pending'",
+                            (Json(stored_evidence), request_id))
+                if cur.rowcount != 1:
+                    raise ValueError("Automatic repair request changed before policy approval")
+                self._record_event(
+                    cur, request_id, "automatic_policy_approved", actor="aiops-auto-policy",
+                    status="pending", event_data=stored_evidence["automatic_policy"],
+                )
+        finally:
+            kb.close()
+        return self.approve_and_execute(request_id, "aiops-auto-policy", automatic=True)
+
+    def approve_and_execute(self, request_id, approver, token=None, automatic=False):
+        if automatic:
+            if not self.config.AIOPS_AUTO_REPAIR_ENABLED:
+                raise PermissionError("Automatic repair is disabled")
+            approver = "aiops-auto-policy"
+        else:
+            approver = self._authorize_decision(token)
         repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
         if not repair_user or repair_user == self.config.DB_USER:
             raise ValueError("Configure a dedicated AIOPS_REPAIR_DB_USER before executing repairs")
@@ -363,7 +468,16 @@ class RepairWorkflow:
                 stored_policy = reviews.get("risk_policy") or {}
                 if stored_policy.get("proposal_fingerprint") != fingerprint:
                     raise ValueError("Risk policy does not match the current proposal")
-                if risk_policy["requires_human_approval"] and not (reviews.get("human_approval") or {}).get("approved"):
+                automatic_policy = reviews.get("automatic_policy") or {}
+                auto_approved = bool(
+                    automatic
+                    and automatic_policy.get("approved") is True
+                    and automatic_policy.get("proposal_fingerprint") == fingerprint
+                    and operation == "analyze_table"
+                )
+                if risk_policy["requires_human_approval"] and not (
+                    (reviews.get("human_approval") or {}).get("approved") or auto_approved
+                ):
                     raise ValueError("Human approval must be recorded before execution")
                 if ((reviews.get("human_approval") or {}).get("proposal_fingerprint")
                         and (reviews.get("human_approval") or {}).get("proposal_fingerprint") != fingerprint):
@@ -384,6 +498,8 @@ class RepairWorkflow:
                     expected_table = f"{expected['schema']}.{expected['table']}"
                     if table != expected_table:
                         raise ValueError("Repair target does not match the audited finding")
+                if automatic and not auto_approved:
+                    raise ValueError("Automatic policy approval is missing or stale")
                 self._record_event(
                     cur, request_id, "execution_claimed", actor=approver,
                     status="executing", event_data={"operation": operation, "parameters": params},

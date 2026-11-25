@@ -29,6 +29,14 @@ CAPABILITIES = {
         "independent_safety_agent": False,
         "human_approval": True,
         "verified_executors": ["analyze_table"],
+        "scheduled_auto_repair": {
+            "configurable": True,
+            "default_enabled": False,
+            "executor": "analyze_table",
+            "requires_explicit_targets": True,
+            "requires_full_health_audit": True,
+            "requires_admin_function_allowlist": True,
+        },
         "suggestion_only": [
             "create_index", "vacuum_table", "reindex", "kill_query",
             "kill_connection", "alter_config",
