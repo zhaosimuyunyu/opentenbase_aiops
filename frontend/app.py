@@ -226,6 +226,41 @@ def render_collection_status(evidence):
         st.info("全库统计遇到锁等待。可在「只读巡检」中填写目标表，单独复查该表的 DN 统计。")
 
 
+def render_automatic_repair(evidence):
+    outcome = evidence.get("automatic_repair")
+    if not outcome:
+        return
+    status = outcome.get("status")
+    labels = {
+        "executed": "自动修复已执行并通过复核",
+        "failed": "自动修复执行失败",
+        "unverified": "自动修复执行后未通过复核",
+        "skipped": "自动修复未执行",
+        "error": "自动修复流程发生错误",
+    }
+    label = labels.get(status, "自动修复状态")
+    reason = outcome.get("reason")
+    if status == "executed":
+        st.success(label)
+    elif status in {"failed", "unverified", "error"}:
+        st.error(label)
+    else:
+        st.info(label)
+    if reason:
+        st.caption(f"原因：{reason}")
+    if outcome.get("request_id"):
+        st.caption(f"修复请求 ID：{outcome['request_id']}")
+    result = outcome.get("result") or {}
+    postcondition = result.get("postcondition") or {}
+    if postcondition:
+        st.caption(
+            f"逐 DN 复核：{'通过' if postcondition.get('verified') else '未通过'} · "
+            f"已更新节点 {', '.join(postcondition.get('advanced_nodes') or []) or '无'}"
+        )
+    with st.expander("自动修复决策与执行详情"):
+        st.json(outcome)
+
+
 def render_repair_proposal(api_base, audit_id, findings):
     candidates = [index for index, item in enumerate(findings) if item.get("check") == "stale_table_statistics"]
     eligible = [index for index in candidates if has_repair_identity(findings[index].get("evidence") or {})]
@@ -434,6 +469,7 @@ elif page == "🛡️ 只读巡检":
         st.metric("风险等级", audit["risk_level"])
         evidence = audit.get("evidence") or {}
         render_collection_status(evidence)
+        render_automatic_repair(evidence)
         render_analysis_status(audit)
         st.caption(f"审计 ID: {audit['audit_id']}")
         findings = audit.get("findings", [])
@@ -493,6 +529,7 @@ elif page == "📜 巡检历史":
                 detail = response.json()
                 evidence = detail.get("evidence") or {}
                 render_collection_status(evidence)
+                render_automatic_repair(evidence)
                 render_repair_proposal(api_base, selected_id, evidence.get("findings", []))
                 analysis = detail.get("ai_analysis") or {}
                 retried_analysis = render_reanalysis_button(
