@@ -428,6 +428,13 @@ def get_automation_status():
                 config.AIOPS_REPAIR_DB_USER.strip()
                 and config.AIOPS_REPAIR_DB_USER != config.DB_USER
             ),
+            "automatic_repair_enabled": config.AIOPS_AUTO_REPAIR_ENABLED,
+            "automatic_repair_targets": list(config.AIOPS_AUTO_REPAIR_TARGETS),
+            "repair_function_enabled": config.AIOPS_REPAIR_FUNCTION_ENABLED,
+            "repair_function": (
+                f"{config.AIOPS_REPAIR_FUNCTION_SCHEMA}."
+                f"{config.AIOPS_REPAIR_FUNCTION_NAME}"
+            ),
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
             "statistics_target": config.AIOPS_AUTO_AUDIT_TABLE,
             "latest_audit": dict(latest) if latest else None,

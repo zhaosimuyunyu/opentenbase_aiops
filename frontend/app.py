@@ -377,6 +377,11 @@ elif page == "🛡️ 只读巡检":
         st.caption(f"周期巡检{mode} · 间隔 {automation['interval_seconds']} 秒")
         if not automation.get("repair_executor_ready"):
             st.warning("修复执行账号未配置。系统会生成只读审计和建议，但不会创建可执行的修复审批请求。")
+        if automation.get("automatic_repair_enabled"):
+            st.caption(
+                "定时自动修复已启用 · 目标 "
+                + (", ".join(automation.get("automatic_repair_targets") or []) or "未配置")
+            )
     except Exception as error:
         st.warning(f"读取周期巡检状态失败: {error}")
     statistics_target = st.text_input("目标表（可选）", placeholder="public.orders").strip()
