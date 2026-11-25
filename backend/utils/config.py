@@ -26,6 +26,10 @@ class Config:
     )
     AIOPS_REPAIR_FUNCTION_SCHEMA: str = os.getenv("AIOPS_REPAIR_FUNCTION_SCHEMA", "aiops_admin")
     AIOPS_REPAIR_FUNCTION_NAME: str = os.getenv("AIOPS_REPAIR_FUNCTION_NAME", "analyze_table")
+    AIOPS_CANCEL_QUERY_ENABLED: bool = (
+        os.getenv("AIOPS_CANCEL_QUERY_ENABLED", "false").lower()
+        in {"1", "true", "yes", "on"}
+    )
     AIOPS_AUTO_REPAIR_ENABLED: bool = (
         os.getenv("AIOPS_AUTO_REPAIR_ENABLED", "false").lower()
         in {"1", "true", "yes", "on"}
