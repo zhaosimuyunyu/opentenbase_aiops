@@ -2,9 +2,19 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.engines.repair_workflow import RepairWorkflow
+from backend.security.permissions import ApprovalWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_legacy_executor_never_reports_mock_success(self):
+        workflow = ApprovalWorkflow.__new__(ApprovalWorkflow)
+        result = workflow._execute_operation({
+            "operation": "drop_database",
+            "parameters": {"database": "production"},
+        })
+        self.assertFalse(result["success"])
+        self.assertIn("No operation executor", result["error"])
+
     def test_destructive_proposals_are_blocked_before_model_or_database(self):
         workflow = RepairWorkflow()
         module = "backend.engines.repair_workflow"
