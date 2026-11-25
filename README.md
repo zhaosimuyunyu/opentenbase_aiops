@@ -140,11 +140,14 @@ opentenbase-aiops/
 
 也可以使用 `scripts/bootstrap_repair_access.sql` 一次创建非超级用户、安装函数并登记一个允许维护的目标。该文件只接受运行时 `psql -v` 变量，仓库不保存数据库密码。
 
+`cancel_query` 是独立的高风险写操作。系统只从 DN 本地锁等待证据生成建议，并要求人工批准。只有配置独立修复账号、完成隔离环境验证后，管理员才可以设置 `AIOPS_CANCEL_QUERY_ENABLED=true`。执行器会在目标 DN 重新核验 PID、用户、数据库、应用名、查询文本和事务时间，调用 `pg_cancel_backend` 后确认原查询已结束。该开关默认为关闭，不能替代 `pg_unlock` 官方扩展的版本和权限核验。
+
 `POST /api/sql-audit` 接收单条 SQL，返回规则命中和风险等级。对未命中高风险规则的 `SELECT`、`WITH`、`VALUES` 语句，可运行带超时限制的只读 `EXPLAIN (FORMAT JSON)`。多条 SQL 会被拒绝。`GET /api/distributed/nodes` 和 `POST /api/distributed/collect` 从 `pgxc_node` 发现 CN/DN，并运行内置只读检查，逐节点报告连接或查询失败。集群注册地址必须能从 API 容器访问。
 
 `AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。
 | `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的普通执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |
 | `AIOPS_REPAIR_DB_PASSWORD` | 独立执行账号的密码 | 空 |
+| `AIOPS_CANCEL_QUERY_ENABLED` | 是否启用经人工审批的 DN 查询取消执行器 | `false` |
 | `AIOPS_AUTO_REPAIR_ENABLED` | 是否允许周期巡检触发自动 `ANALYZE` | `false` |
 | `AIOPS_AUTO_REPAIR_TARGETS` | 自动修复目标，必须是显式白名单中的 schema.table | 空 |
 
