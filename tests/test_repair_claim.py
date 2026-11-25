@@ -23,6 +23,16 @@ class RepairClaimTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("No operation executor", result["error"])
 
+    def test_analyze_requires_owner_privilege_on_every_data_node(self):
+        nodes = [
+            {"node_name": "dn1", "execution_user_is_owner": True},
+            {"node_name": "dn2", "execution_user_is_owner": False},
+        ]
+        with self.assertRaisesRegex(ValueError, "dn2"):
+            RepairWorkflow._require_analyze_ownership(nodes)
+        nodes[1]["execution_user_is_owner"] = True
+        RepairWorkflow._require_analyze_ownership(nodes)
+
     def test_destructive_proposals_are_blocked_before_model_or_database(self):
         workflow = RepairWorkflow()
         module = "backend.engines.repair_workflow"

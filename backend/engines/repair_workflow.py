@@ -117,7 +117,7 @@ class RepairWorkflow:
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS agent_review jsonb")
 
     @staticmethod
-    def _read_data_node_stats(connection, schema_name, table_name):
+    def _read_data_node_stats(connection, schema_name, table_name, execution_user=None):
         with connection.cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout = '2500ms'")
             cursor.execute("SET LOCAL lock_timeout = '750ms'")
@@ -129,10 +129,18 @@ class RepairWorkflow:
 
         qualified_name = sql.Identifier(schema_name, table_name).as_string(connection)
         remote_query = sql.SQL(
-            "SELECT pg_stat_get_live_tuples(oid), pg_stat_get_mod_since_analyze(oid), "
-            "pg_stat_get_last_analyze_time(oid), oid FROM pg_catalog.pg_class "
-            "WHERE oid = pg_catalog.to_regclass({}) AND relkind IN ('r', 'p')"
-        ).format(sql.Literal(qualified_name)).as_string(connection)
+            "SELECT pg_stat_get_live_tuples(c.oid), pg_stat_get_mod_since_analyze(c.oid), "
+            "pg_stat_get_last_analyze_time(c.oid), c.oid, "
+            "pg_catalog.pg_get_userbyid(c.relowner), pg_catalog.pg_get_userbyid(d.datdba), "
+            "({} IS NOT NULL AND ({} IN (pg_catalog.pg_get_userbyid(c.relowner), "
+            "pg_catalog.pg_get_userbyid(d.datdba)))) "
+            "FROM pg_catalog.pg_class c CROSS JOIN pg_catalog.pg_database d "
+            "WHERE c.oid = pg_catalog.to_regclass({}) AND c.relkind IN ('r', 'p') "
+            "AND d.datname = current_database()"
+        ).format(
+            sql.Literal(execution_user), sql.Literal(execution_user),
+            sql.Literal(qualified_name),
+        ).as_string(connection)
         per_node = []
         for node_name in data_nodes:
             with connection.cursor() as cursor:
@@ -151,6 +159,9 @@ class RepairWorkflow:
                     "modifications_since_analyze": stats[1] or 0,
                     "last_analyze": stats[2],
                     "relation_oid": stats[3],
+                    "table_owner": stats[4],
+                    "database_owner": stats[5],
+                    "execution_user_is_owner": stats[6],
                 })
         if not per_node:
             raise ValueError("Table statistics are unavailable on all OpenTenBase data nodes")
@@ -161,6 +172,18 @@ class RepairWorkflow:
             ),
             "nodes": per_node,
         }
+
+    @staticmethod
+    def _require_analyze_ownership(nodes):
+        unauthorized_nodes = [
+            item["node_name"] for item in nodes
+            if item.get("execution_user_is_owner") is not True
+        ]
+        if unauthorized_nodes:
+            raise ValueError(
+                "Configured repair role is neither table nor database owner on data nodes: "
+                + ", ".join(unauthorized_nodes)
+            )
 
     def create_request(self, operation, parameters, evidence, reason, audit_id=None, finding=None):
         if operation not in ALLOWED_OPERATIONS:
@@ -373,7 +396,9 @@ class RepairWorkflow:
                         if reader.fetchone() != identity[:2]:
                             raise ValueError("Statistics connection does not match the repair database")
                     stats_conn.rollback()
-                    stats = self._read_data_node_stats(stats_conn, schema_name, table_name)
+                    stats = self._read_data_node_stats(
+                        stats_conn, schema_name, table_name, execution_user=repair_user
+                    )
                     live_tuples = stats["live_tuples"]
                     modifications = stats["modifications_since_analyze"]
                     previous_by_node = {
@@ -387,6 +412,7 @@ class RepairWorkflow:
                     }
                     if not audited_relations or audited_relations != current_relations:
                         raise ValueError("Audited table identity or data-node coverage changed; rerun the health audit")
+                    self._require_analyze_ownership(stats["nodes"])
                     with conn.cursor() as target:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
@@ -413,7 +439,9 @@ class RepairWorkflow:
                     for delay in (0, 0.5, 1, 2):
                         if delay:
                             sleep(delay)
-                        post_stats = self._read_data_node_stats(stats_conn, schema_name, table_name)
+                        post_stats = self._read_data_node_stats(
+                            stats_conn, schema_name, table_name, execution_user=repair_user
+                        )
                         current_by_node = {
                             item["node_name"]: item["last_analyze"] for item in post_stats["nodes"]
                         }
