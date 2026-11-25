@@ -130,6 +130,8 @@ opentenbase-aiops/
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
+
+修复请求的执行顺序是程序校验、模型复核、独立安全审查 Agent、人工批准和执行。人工批准通过 `/api/repairs/{request_id}/human-approval` 单独记录，随后才允许调用批准执行接口。删除库、删表和任意 SQL 不在执行白名单内。
 | `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的普通执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |
 | `AIOPS_REPAIR_DB_PASSWORD` | 独立执行账号的密码 | 空 |
 
