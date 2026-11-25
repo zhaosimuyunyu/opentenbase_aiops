@@ -3,9 +3,19 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.engines.readonly_audit_engine import ReadonlyAuditEngine
+from backend.collectors.readonly_health import stale_statistics_nodes
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
+    def test_statistics_threshold_is_per_node(self):
+        nodes = [
+            {"node_name": "dn1", "live_tuples": 2000, "modifications_since_analyze": 600},
+            {"node_name": "dn2", "live_tuples": 2000, "modifications_since_analyze": 600},
+        ]
+        self.assertEqual(stale_statistics_nodes(nodes), [])
+        nodes[1]["modifications_since_analyze"] = 1000
+        self.assertEqual(stale_statistics_nodes(nodes), ["dn2"])
+
     async def test_model_fallback_preserves_critical_node_risk(self):
         module = "backend.engines.readonly_audit_engine"
         with patch(f"{module}.OperationsStore") as store, patch(
@@ -73,6 +83,7 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_complete_fallback_statistics_generate_repair_findings(self):
         module = "backend.engines.readonly_audit_engine"
         stats = {"schemaname": "public", "live_tuples": 1500, "modifications_since_analyze": 1500}
+        stats["nodes"] = [{"node_name": "dn0001", **stats}]
         snapshot = {
             "status": "partial",
             "errors": {"data_node_stats:dn0002": {"sqlstate": "55P03"}},
@@ -110,6 +121,8 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
                     "tablename": "orders",
                     "live_tuples": 1500,
                     "modifications_since_analyze": 1500,
+                    "nodes": [{"node_name": "dn0001", "live_tuples": 1500,
+                               "modifications_since_analyze": 1500}],
                 }],
             },
         }

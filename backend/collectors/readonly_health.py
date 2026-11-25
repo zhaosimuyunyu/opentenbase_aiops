@@ -17,6 +17,14 @@ def _collection_error(error):
     }
 
 
+def stale_statistics_nodes(nodes):
+    return [
+        node["node_name"] for node in nodes
+        if (node.get("modifications_since_analyze") or 0)
+        >= max(1000, (node.get("live_tuples") or 0) * 0.2)
+    ]
+
+
 CHECKS = {
     "pg_clean_diagnostics": """
         SELECT function_oid IS NOT NULL AS registered,

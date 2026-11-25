@@ -7,7 +7,7 @@ from ..tools.lock_audit_tool import execute_get_database_locks
 from ..ai.agent_client import AIOpsAgent
 from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
-from ..collectors.readonly_health import ReadonlyHealthCollector
+from ..collectors.readonly_health import ReadonlyHealthCollector, stale_statistics_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +251,11 @@ class ReadonlyAuditEngine:
         for table_stat, source in table_stats:
             live = table_stat.get('live_tuples') or 0
             modifications = table_stat.get('modifications_since_analyze') or 0
-            if modifications >= 1000 and modifications >= live * 0.2:
+            stale_nodes = stale_statistics_nodes(table_stat.get('nodes', []))
+            if stale_nodes:
                 findings.append({
                     'check': 'stale_table_statistics', 'severity': 'medium',
-                    'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} has {modifications} modifications since ANALYZE summed across data nodes",
+                    'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} has stale statistics on {', '.join(stale_nodes)}",
                     'evidence': {
                         'schema': table_stat['schemaname'], 'table': table_stat['tablename'],
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
@@ -263,6 +264,7 @@ class ReadonlyAuditEngine:
                         'audit_target': self.config.audit_target,
                         'statistics_source': source,
                         'statistics_aggregation': 'data_node_sum',
+                        'stale_nodes': stale_nodes,
                     },
                 })
             dead = table_stat.get('dead_tuples') or 0

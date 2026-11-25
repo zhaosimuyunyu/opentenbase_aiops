@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from psycopg2 import Error, sql
 from psycopg2.extras import Json
 from openai import OpenAI, OpenAIError
+from ..collectors.readonly_health import stale_statistics_nodes
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
 from ..utils.operations_store import OperationsStore
@@ -353,7 +354,8 @@ class RepairWorkflow:
                     with conn.cursor() as target:
                         target.execute("SET LOCAL statement_timeout = '10s'")
                         target.execute("SET LOCAL lock_timeout = '1s'")
-                        if (modifications or 0) < max(1000, (live_tuples or 0) * 0.2):
+                        stale_nodes = stale_statistics_nodes(stats["nodes"])
+                        if not stale_nodes:
                             raise ValueError("The original ANALYZE finding is no longer present")
                         execution_attempted = True
                         target.execute(
@@ -388,6 +390,7 @@ class RepairWorkflow:
                         "table": table,
                         "precondition": {
                             "statistics_aggregation": "data_node_sum",
+                            "stale_nodes": stale_nodes,
                             "live_tuples_estimate": live_tuples,
                             "modifications_since_analyze": modifications,
                             "data_nodes": [
