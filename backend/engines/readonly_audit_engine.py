@@ -109,6 +109,7 @@ class ReadonlyAuditEngine:
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info', 'database_identity',
                     'prepared_transactions', 'data_node_prepared_transactions', 'pg_clean_diagnostics',
+                    'pg_unlock_diagnostics',
                     'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
@@ -290,6 +291,7 @@ class ReadonlyAuditEngine:
         cluster_checks = {
             'nodes', 'connections', 'max_connections', 'replication',
             'database_info', 'database_identity', 'prepared_transactions', 'pg_clean_diagnostics',
+            'pg_unlock_diagnostics',
         }
         performance_checks = {
             'locks', 'long_running_queries', 'idle_transactions',

@@ -5,6 +5,7 @@ CAPABILITIES = {
     "audit": {
         "readonly_health": True,
         "readonly_lock": True,
+        "pg_unlock_extension_probe": True,
         "sse_progress": True,
     },
     "knowledge": {

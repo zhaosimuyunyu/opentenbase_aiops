@@ -26,6 +26,18 @@ def stale_statistics_nodes(nodes):
 
 
 CHECKS = {
+    "pg_unlock_diagnostics": """
+        SELECT dependency_oid IS NOT NULL AS dependency_registered,
+               pg_catalog.has_function_privilege(dependency_oid, 'EXECUTE') AS dependency_executable,
+               deadlock_oid IS NOT NULL AS deadlock_registered,
+               pg_catalog.has_function_privilege(deadlock_oid, 'EXECUTE') AS deadlock_executable,
+               EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions
+                       WHERE name = 'pg_unlock') AS package_available
+        FROM (SELECT pg_catalog.to_regprocedure('public.pg_unlock_check_dependency()')::oid
+                     AS dependency_oid,
+                     pg_catalog.to_regprocedure('public.pg_unlock_check_deadlock()')::oid
+                     AS deadlock_oid) AS diagnostic
+    """,
     "pg_clean_diagnostics": """
         SELECT function_oid IS NOT NULL AS registered,
                pg_catalog.has_function_privilege(function_oid, 'EXECUTE') AS executable,

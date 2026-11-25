@@ -7,6 +7,11 @@ from backend.ai.agent_client import AIOpsAgent
 
 
 class NodeConnectivityTests(unittest.TestCase):
+    def test_official_pg_unlock_probe_is_read_only(self):
+        self.assertIn("pg_unlock_check_dependency", CHECKS["pg_unlock_diagnostics"])
+        self.assertIn("pg_unlock_check_deadlock", CHECKS["pg_unlock_diagnostics"])
+        self.assertNotIn("pg_unlock_execute", CHECKS["pg_unlock_diagnostics"])
+
     def test_bulk_limit_preserves_partial_status_and_collects_configured_table(self):
         target = "public.orders"
         collector = ReadonlyHealthCollector(SimpleNamespace(AIOPS_AUTO_AUDIT_TARGETS=[target]))
