@@ -245,6 +245,14 @@ class ReadonlyAuditEngine:
                 'transaction_databases': databases,
                 'evidence': matching_prepared,
             })
+            pg_clean = (cluster.get('pg_clean_diagnostics') or [{}])[0]
+            if pg_clean.get('record_list_registered') is False:
+                findings.append({
+                    'check': 'official_2pc_record_diagnostics_unavailable',
+                    'severity': 'low',
+                    'observed': 'OpenTenBase pgxc_get_record_list is not registered on the connected CN',
+                    'evidence': pg_clean,
+                })
         for row in checks.get('replication') or []:
             if row.get('state') != 'streaming':
                 findings.append({

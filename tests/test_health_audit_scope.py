@@ -7,6 +7,30 @@ from backend.collectors.readonly_health import stale_statistics_nodes
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepared_transaction_reports_missing_official_record_diagnostic(self):
+        module = "backend.engines.readonly_audit_engine"
+        snapshot = {
+            "status": "success", "errors": {},
+            "checks": {
+                "locks": [{"granted": False, "transactionid": "42"}],
+                "prepared_transactions": [{"transaction_id": "42", "gid": "g", "database": "postgres"}],
+                "pg_clean_diagnostics": [{
+                    "registered": False, "record_list_registered": False,
+                    "package_available": False,
+                }],
+            },
+        }
+        with patch(f"{module}.OperationsStore"), patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(
+            ReadonlyAuditEngine, "_diagnose",
+            new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []}),
+        ):
+            collector.return_value.collect.return_value = snapshot
+            result = await ReadonlyAuditEngine().run_health_audit()
+        checks = [item["check"] for item in result["findings"]]
+        self.assertIn("official_2pc_record_diagnostics_unavailable", checks)
+
     async def test_lock_finding_notes_missing_official_unlock_diagnostics(self):
         module = "backend.engines.readonly_audit_engine"
         snapshot = {

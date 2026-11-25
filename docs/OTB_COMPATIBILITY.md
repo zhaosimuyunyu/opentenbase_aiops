@@ -1,5 +1,7 @@
 # OpenTenBase 兼容性基线
 
+健康巡检会同时探测 `pg_clean_check_txn(integer)` 和官方内部记录读取函数 `pgxc_get_record_list()`。当前实验集群两者均未注册，因此当锁等待与 prepared transaction 关联时，审计会明确生成低风险的 `official_2pc_record_diagnostics_unavailable` 发现。该发现表示官方诊断覆盖缺失，不表示 AIOps 可以安全替代官方 2PC 恢复流程。
+
 scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口逐项执行只读探测。每个 SQL 探测独立回滚，使用 1.5 秒语句超时和 300 毫秒锁超时。脚本还会对 pgxc_node 注册的 CN、DN、GTM 地址进行 TCP 连通性检查。探测失败或节点地址缺失都会导致整体验收失败。
 
 当前已验证的 OpenTenBase 实验版本为 OpenTenBase_v5.0，服务器返回 PostgreSQL 10.0 兼容标识。AIOps API 容器通过 psycopg2 使用 otb-node1:11003 成功建立连接，并读取到 pgxc_node、pg_stat_activity、pg_locks、pg_prepared_xacts 和 pg_stat_replication。

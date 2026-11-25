@@ -41,13 +41,17 @@ CHECKS = {
     "pg_clean_diagnostics": """
         SELECT function_oid IS NOT NULL AS registered,
                pg_catalog.has_function_privilege(function_oid, 'EXECUTE') AS executable,
+               record_list_oid IS NOT NULL AS record_list_registered,
+               pg_catalog.has_function_privilege(record_list_oid, 'EXECUTE') AS record_list_executable,
                EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions
                        WHERE name = 'pg_clean') AS package_available,
                (SELECT extversion FROM pg_catalog.pg_extension
                 WHERE extname = 'pg_clean') AS installed_version,
                pg_catalog.current_setting('enable_clean_2pc_launcher', true) AS launcher_setting
         FROM (SELECT pg_catalog.to_regprocedure('public.pg_clean_check_txn(integer)')::oid
-                     AS function_oid) AS diagnostic
+                     AS function_oid,
+                     pg_catalog.to_regprocedure('public.pgxc_get_record_list()')::oid
+                     AS record_list_oid) AS diagnostic
     """,
     "database_identity": """
         SELECT system_identifier::text AS system_identifier,
