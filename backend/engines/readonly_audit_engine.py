@@ -100,8 +100,10 @@ class ReadonlyAuditEngine:
                 'risk_level': risk_level,
                 'evidence': locks, **analysis}
 
-    async def run_health_audit(self, *, trigger="manual", table=None):
+    async def run_health_audit(self, *, trigger="manual", table=None, progress=None):
         """Run read-only checks across cluster, capacity, locks, and query health."""
+        if progress:
+            progress("collecting")
         snapshot = ReadonlyHealthCollector(self.config).collect(table=table)
         checks = snapshot['checks']
         cluster = {name: checks.get(name) for name in
@@ -339,6 +341,8 @@ class ReadonlyAuditEngine:
             }
             risk_level = 'unknown'
         else:
+            if progress:
+                progress("diagnosing")
             analysis = await self._diagnose(issue, evidence)
             structured = analysis.get('structured') or {}
             risk_level = structured.get('risk_level')
@@ -365,6 +369,8 @@ class ReadonlyAuditEngine:
                     level for level, rank in severity_rank.items()
                     if rank == deterministic_floor
                 )
+        if progress:
+            progress("saving")
         audit_id = str(uuid.uuid4())
         kb = OperationsStore()
         try:

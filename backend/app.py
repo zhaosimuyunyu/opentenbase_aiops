@@ -1,10 +1,11 @@
 """FastAPI application (optional REST API)"""
 import asyncio
+import json
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
@@ -226,6 +227,47 @@ async def run_readonly_health_audit(
     except Exception as e:
         logger.exception("Read-only health audit failed")
         raise HTTPException(status_code=503, detail="Read-only health audit failed") from e
+
+
+@app.post("/api/audits/health/stream")
+async def stream_readonly_health_audit(
+    table: Optional[str] = Query(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"),
+):
+    """Stream progress and the persisted result of a manual audit."""
+    loop = asyncio.get_running_loop()
+    events = asyncio.Queue()
+
+    def progress(stage):
+        loop.call_soon_threadsafe(events.put_nowait, {"type": "progress", "stage": stage})
+
+    async def run():
+        try:
+            result = await health_audit_scheduler.run_once(table=table, progress=progress)
+            event = {"type": "busy"} if result is None else {"type": "result", "audit": result}
+        except Exception:
+            logger.exception("Streaming health audit failed")
+            event = {"type": "error"}
+        events.put_nowait(event)
+
+    async def stream():
+        # Keep the audit running so a disconnected client can find it in history.
+        task = asyncio.create_task(run())
+        yield 'data: {"type":"progress","stage":"starting"}\n\n'
+        while True:
+            try:
+                event = await asyncio.wait_for(events.get(), timeout=10)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+            if event["type"] != "progress":
+                await task
+                return
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/automation/status")

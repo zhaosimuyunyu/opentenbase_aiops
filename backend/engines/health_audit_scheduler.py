@@ -17,13 +17,15 @@ class HealthAuditScheduler:
         self.config = config or Config()
         self._run_lock = asyncio.Lock()
 
-    async def run_once(self, *, scheduled=False, table=None):
+    async def run_once(self, *, scheduled=False, table=None, progress=None):
         if self._run_lock.locked():
             return None
         async with self._run_lock:
+            if progress is not None:
+                return await run_in_threadpool(self._run_with_database_lock, scheduled, table, progress)
             return await run_in_threadpool(self._run_with_database_lock, scheduled, table)
 
-    def _run_with_database_lock(self, scheduled, table):
+    def _run_with_database_lock(self, scheduled, table, progress=None):
         target = Json(self.config.audit_target)
         kb = OperationsStore()
         acquired = False
@@ -57,6 +59,8 @@ class HealthAuditScheduler:
                 kb.conn.commit()
             trigger = "scheduled" if scheduled else "manual"
             options = {"table": table} if table else {}
+            if progress is not None:
+                options["progress"] = progress
             return asyncio.run(ReadonlyAuditEngine(self.config).run_health_audit(trigger=trigger, **options))
         finally:
             if acquired and not kb.conn.closed:

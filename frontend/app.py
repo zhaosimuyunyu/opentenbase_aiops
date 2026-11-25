@@ -3,6 +3,7 @@ import streamlit as st
 import sys
 import os
 import requests
+import json
 from pathlib import Path
 
 # Add backend to path
@@ -339,21 +340,41 @@ elif page == "🛡️ 只读巡检":
     statistics_target = st.text_input("目标表（可选）", placeholder="public.orders").strip()
     if st.button("运行只读巡检", type="primary"):
         st.session_state.pop("last_health_audit", None)
-        with st.spinner("正在采集 OpenTenBase 状态并分析..."):
+        with st.status("正在启动巡检") as status:
             try:
                 params = {"table": statistics_target} if statistics_target else None
-                response = requests.post(
-                    f"{api_base}/api/audits/health", params=params,
+                stages = {
+                    "starting": "正在启动巡检",
+                    "collecting": "正在采集 OpenTenBase 状态",
+                    "diagnosing": "正在生成诊断报告",
+                    "saving": "正在保存审计记录",
+                }
+                with requests.post(
+                    f"{api_base}/api/audits/health/stream", params=params, stream=True,
                     timeout=st.session_state.config.AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS,
-                )
-                if response.status_code == 409:
-                    st.info("已有巡检正在运行")
-                else:
+                ) as response:
                     response.raise_for_status()
-                    st.session_state.last_health_audit = response.json()
+                    for line in response.iter_lines(chunk_size=1):
+                        if not line.startswith(b"data:"):
+                            continue
+                        event = json.loads(line[5:])
+                        if event["type"] == "progress":
+                            status.update(label=stages[event["stage"]])
+                            continue
+                        if event["type"] == "result":
+                            st.session_state.last_health_audit = event["audit"]
+                            status.update(label="巡检已完成", state="complete")
+                        elif event["type"] == "busy":
+                            status.update(label="已有巡检正在运行", state="complete")
+                        else:
+                            status.update(label="服务端巡检失败", state="error")
+                        break
+                    else:
+                        status.update(label="巡检连接已中断，请到巡检历史确认结果", state="error")
             except requests.exceptions.Timeout:
-                st.warning("等待巡检响应超时，服务端可能仍在运行。请到巡检历史确认结果。")
+                status.update(label="等待巡检响应超时，请到巡检历史确认结果", state="error")
             except Exception as error:
+                status.update(label="巡检连接失败", state="error")
                 st.error(f"巡检失败: {error}")
     audit = st.session_state.get("last_health_audit")
     if audit:
@@ -364,7 +385,11 @@ elif page == "🛡️ 只读巡检":
         st.caption(f"审计 ID: {audit['audit_id']}")
         findings = audit.get("findings", [])
         if findings:
-            st.dataframe(findings, use_container_width=True, hide_index=True)
+            rows = [
+                {**finding, "evidence": json.dumps(finding.get("evidence"), ensure_ascii=False)}
+                for finding in findings
+            ]
+            st.dataframe(rows, use_container_width=True, hide_index=True)
             render_repair_proposal(api_base, audit["audit_id"], findings)
         elif evidence.get("collection_status") == "success":
             st.success("未发现规则告警")
