@@ -41,6 +41,10 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(search.await_count, 2)
         self.assertIn("tools", completion.call_args_list[1].kwargs)
         self.assertEqual(len(report["knowledge_refs"]), 2)
+        self.assertEqual(report["tool_trace"], [
+            {"round": 1, "tool": "search_knowledge", "hits": 1, "failed": False},
+            {"round": 2, "tool": "search_knowledge", "hits": 1, "failed": False},
+        ])
         self.assertEqual(report["structured"]["analysis_source"], "model")
 
     async def test_invalid_report_preserves_retrieved_references(self):

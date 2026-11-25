@@ -113,6 +113,10 @@ def render_analysis_status(analysis):
     if not isinstance(analysis, dict):
         return
     tool_errors = set(analysis.get("tool_errors") or [])
+    tool_trace = analysis.get("tool_trace") or []
+    if tool_trace:
+        with st.expander("诊断工具调用"):
+            st.dataframe(tool_trace, hide_index=True, use_container_width=True)
     if "KnowledgeToolCallLimit" in tool_errors:
         st.warning("已达到本次巡检的知识检索次数上限")
         tool_errors.remove("KnowledgeToolCallLimit")

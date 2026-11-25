@@ -60,9 +60,12 @@ class AIOpsAgent:
             return self._fallback_diagnosis(context, error)
         refs = []
         tool_errors = []
+        tool_trace = []
+        round_number = 0
         final = first
         remaining_calls = MAX_KNOWLEDGE_TOOL_CALLS
         while getattr(final, 'tool_calls', None) and remaining_calls:
+            round_number += 1
             selected_calls = final.tool_calls[:remaining_calls]
             remaining_calls -= len(selected_calls)
             if len(final.tool_calls) > len(selected_calls):
@@ -89,6 +92,12 @@ class AIOpsAgent:
                     tool_errors.append(type(error).__name__)
                     result = {'error': 'Knowledge retrieval unavailable', 'results': []}
                 refs.extend(result.get('results', []))
+                tool_trace.append({
+                    'round': round_number,
+                    'tool': 'search_knowledge' if call.function.name == 'search_knowledge' else 'unknown',
+                    'hits': len(result.get('results', [])),
+                    'failed': 'error' in result,
+                })
                 messages.append({'role': 'tool', 'tool_call_id': call.id, 'content': json.dumps(result, ensure_ascii=False)})
             try:
                 options = {'tools': [TOOL_SCHEMA], 'tool_choice': 'auto'} if remaining_calls else {}
@@ -96,7 +105,8 @@ class AIOpsAgent:
                     model=self.model, messages=messages, **options
                 ))
             except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
-                return {**self._fallback_diagnosis(context, error, refs, True), 'tool_errors': tool_errors}
+                return {**self._fallback_diagnosis(context, error, refs, True),
+                        'tool_errors': tool_errors, 'tool_trace': tool_trace}
         content = final.content or ''
         if first.tool_calls and not refs and not tool_errors:
             try:
@@ -121,15 +131,15 @@ class AIOpsAgent:
             except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
                 return {**self._fallback_diagnosis(
                     context, error, refs, bool(first.tool_calls)
-                ), 'tool_errors': tool_errors}
+                ), 'tool_errors': tool_errors, 'tool_trace': tool_trace}
         if structured.get('parse_error'):
             return {**self._fallback_diagnosis(
                 context, 'InvalidDiagnosticReport', refs, bool(first.tool_calls)
-            ), 'tool_errors': tool_errors}
+            ), 'tool_errors': tool_errors, 'tool_trace': tool_trace}
         structured['analysis_source'] = 'model'
         return {'analysis': content, 'structured': structured, 'knowledge_refs': refs,
                 'tool_called': bool(first.tool_calls), 'analysis_fallback': False,
-                'tool_errors': tool_errors}
+                'tool_errors': tool_errors, 'tool_trace': tool_trace}
 
     @staticmethod
     def _parse_report(content):
