@@ -230,6 +230,92 @@ class RepairClaimTests(unittest.TestCase):
         self.assertEqual(result, {"status": "skipped", "reason": "automatic_repair_disabled"})
         store.assert_not_called()
 
+    def test_automatic_repair_skips_manual_or_incomplete_audits(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_AUTO_REPAIR_ENABLED=True,
+            AIOPS_REPAIR_FUNCTION_ENABLED=True,
+            AIOPS_REPAIR_DB_USER="repair_operator",
+            DB_USER="auditor",
+        )
+        cases = [
+            ({"trigger": "manual", "collection_status": "success",
+              "performance_status": "success", "findings": []}, "audit_was_not_scheduled"),
+            ({"trigger": "scheduled", "collection_status": "partial",
+              "performance_status": "success", "findings": []}, "health_collection_incomplete"),
+        ]
+        for evidence, expected_reason in cases:
+            with self.subTest(reason=expected_reason):
+                store = MagicMock()
+                store.conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (
+                    evidence, {}, [],
+                )
+                with patch(
+                    "backend.engines.repair_workflow.OperationsStore", return_value=store
+                ), patch.object(workflow, "_ensure_schema"), patch.object(
+                    workflow, "create_request"
+                ) as create_request:
+                    result = workflow.auto_repair_from_audit("audit-1")
+                self.assertEqual(result["reason"], expected_reason)
+                create_request.assert_not_called()
+                store.close.assert_called_once()
+
+    def test_automatic_repair_persists_policy_before_execution_handoff(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_AUTO_REPAIR_ENABLED=True,
+            AIOPS_REPAIR_FUNCTION_ENABLED=True,
+            AIOPS_REPAIR_DB_USER="repair_operator",
+            DB_USER="auditor",
+            AIOPS_AUTO_REPAIR_TARGETS=("public.orders",),
+        )
+        finding = {
+            "check": "stale_table_statistics",
+            "evidence": {"schema": "public", "table": "orders"},
+        }
+        audit_store = MagicMock()
+        audit_store.conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (
+            {
+                "trigger": "scheduled", "collection_status": "success",
+                "performance_status": "success", "findings": [finding],
+            },
+            {"analysis_fallback": True}, [],
+        )
+        parameters = {"table": "public.orders"}
+        repair_evidence = {"proposal_source": "scheduled_auto_repair", "trigger": "scheduled"}
+        repair_store = MagicMock()
+        repair_cursor = repair_store.conn.cursor.return_value.__enter__.return_value
+        repair_cursor.fetchone.return_value = (
+            "analyze_table", parameters, "pending", "audit-1", finding, repair_evidence,
+        )
+        repair_cursor.rowcount = 1
+        with patch(
+            "backend.engines.repair_workflow.OperationsStore",
+            side_effect=[audit_store, repair_store],
+        ), patch.object(workflow, "_ensure_schema"), patch.object(
+            workflow, "create_request", return_value={"request_id": "request-1", "status": "pending"}
+        ) as create_request, patch.object(
+            workflow, "approve_and_execute", return_value={"request_id": "request-1", "status": "executed"}
+        ) as execute:
+            result = workflow.auto_repair_from_audit("audit-1")
+
+        self.assertEqual(result["status"], "executed")
+        create_request.assert_called_once()
+        update_call = next(
+            call for call in repair_cursor.execute.call_args_list
+            if "UPDATE repair_requests SET evidence" in call.args[0]
+        )
+        policy = update_call.args[1][0].adapted["automatic_policy"]
+        self.assertTrue(policy["approved"])
+        self.assertEqual(policy["actor"], "aiops-auto-policy")
+        self.assertEqual(policy["proposal_fingerprint"], _proposal_fingerprint(
+            "analyze_table", parameters, "audit-1", finding
+        ))
+        self.assertEqual(repair_cursor.execute.call_args_list[0].args[1], ("request-1",))
+        execute.assert_called_once_with("request-1", "aiops-auto-policy", automatic=True)
+        audit_store.close.assert_called_once()
+        repair_store.close.assert_called_once()
+
     def test_individual_tokens_bind_identity_and_disable_shared_token(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(
