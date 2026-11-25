@@ -56,6 +56,8 @@ class NodeConnection:
 
         try:
             with self._connection.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SET LOCAL statement_timeout = '2500ms'")
+                cur.execute("SET LOCAL lock_timeout = '750ms'")
                 cur.execute(sql, params)
                 return [dict(row) for row in cur.fetchall()]
         except Exception as e:
@@ -126,6 +128,8 @@ class DistributedCollector:
             for name in check_names:
                 try:
                     with connection._connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                        cursor.execute("SET LOCAL statement_timeout = '2500ms'")
+                        cursor.execute("SET LOCAL lock_timeout = '750ms'")
                         cursor.execute(CHECKS[name])
                         checks[name] = [dict(row) for row in cursor.fetchall()]
                     connection._connection.rollback()

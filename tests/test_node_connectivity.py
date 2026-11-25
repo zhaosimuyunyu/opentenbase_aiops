@@ -45,6 +45,19 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["status"], "partial")
         self.assertEqual(result["errors"][0]["node_name"], "dn0001")
 
+    def test_each_distributed_check_sets_readonly_timeouts(self):
+        collector = DistributedCollector(SimpleNamespace())
+        node = {"node_name": "dn0001", "node_type": "D", "node_host": "dn1", "node_port": 11006}
+        connection = MagicMock()
+        connection.connect.return_value = True
+        connection._connection.cursor.return_value.__enter__.return_value.fetchall.return_value = []
+        with patch("backend.utils.distributed_collector.NodeConnection", return_value=connection):
+            result = collector._collect_node_checks(node, ["key_guc"])
+        self.assertEqual(result["status"], "success")
+        calls = connection._connection.cursor.return_value.__enter__.return_value.execute.call_args_list
+        self.assertEqual(calls[0].args, ("SET LOCAL statement_timeout = '2500ms'",))
+        self.assertEqual(calls[1].args, ("SET LOCAL lock_timeout = '750ms'",))
+
     def test_official_pg_unlock_probe_is_read_only(self):
         self.assertIn("pg_unlock_check_dependency", CHECKS["pg_unlock_diagnostics"])
         self.assertIn("pg_unlock_check_deadlock", CHECKS["pg_unlock_diagnostics"])

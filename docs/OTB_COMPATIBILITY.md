@@ -2,6 +2,10 @@
 
 健康巡检会同时探测 `pg_clean_check_txn(integer)` 和官方内部记录读取函数 `pgxc_get_record_list()`。当前实验集群两者均未注册，因此当锁等待与 prepared transaction 关联时，审计会明确生成低风险的 `official_2pc_record_diagnostics_unavailable` 发现。该发现表示官方诊断覆盖缺失，不表示 AIOps 可以安全替代官方 2PC 恢复流程。
 
+### 分布式直连采集的超时与现场复测
+
+`DistributedCollector` 对每个直连 CN/DN 的只读检查统一设置事务级 `statement_timeout=2500ms` 和 `lock_timeout=750ms`，失败会回滚该检查并将异常类型及 SQLSTATE 放入对应节点的 `errors`。2026-11-25 在真实集群上对两个 DN 执行 `locks` 检查均成功。执行 `table_stats` 时两个 DN 都在目录锁等待中以 SQLSTATE `55P03` 结束，节点状态为 `partial`，且接口在约 2 秒内返回。这与普通的“节点成功/失败”汇总不同，保留了每节点每检查的部分结果，便于定位 prepared transaction 造成的目录扫描阻塞。
+
 scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口逐项执行只读探测。每个 SQL 探测独立回滚，使用 1.5 秒语句超时和 300 毫秒锁超时。脚本还会对 pgxc_node 注册的 CN、DN、GTM 地址进行 TCP 连通性检查。探测失败或节点地址缺失都会导致整体验收失败。
 
 当前已验证的 OpenTenBase 实验版本为 OpenTenBase_v5.0，服务器返回 PostgreSQL 10.0 兼容标识。AIOps API 容器通过 psycopg2 使用 otb-node1:11003 成功建立连接，并读取到 pgxc_node、pg_stat_activity、pg_locks、pg_prepared_xacts 和 pg_stat_replication。
