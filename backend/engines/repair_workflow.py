@@ -368,6 +368,15 @@ class RepairWorkflow:
                             target.execute(sql.SQL("ANALYZE {}").format(relation))
                         finally:
                             analyze_notices = [notice.strip() for notice in conn.notices]
+                        skipped_objects = [
+                            notice for notice in analyze_notices
+                            if "WARNING:" in notice and "skipping " in notice
+                        ]
+                        if skipped_objects:
+                            raise ValueError(
+                                "ANALYZE skipped one or more objects: "
+                                + " | ".join(skipped_objects)
+                            )
                     conn.commit()
                     # The statistics collector can publish updates after ANALYZE commits.
                     for delay in (0, 0.5, 1, 2):
