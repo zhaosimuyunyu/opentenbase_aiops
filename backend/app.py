@@ -408,6 +408,8 @@ def audit_metrics():
     metrics.append(f"aiops_health_audit_scheduled_analysis_degraded {int(analysis_degraded)}")
     metrics.append("# TYPE aiops_repair_review_count gauge")
     metrics.append(f"aiops_repair_review_count {status['repair_review_count']}")
+    metrics.append("# TYPE aiops_repair_executor_ready gauge")
+    metrics.append(f"aiops_repair_executor_ready {int(status['repair_executor_ready'])}")
     return PlainTextResponse("\n".join(metrics) + "\n", media_type="text/plain; version=0.0.4")
 
 

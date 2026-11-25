@@ -1,5 +1,6 @@
 import re
 import hmac
+import hashlib
 import json
 import uuid
 from copy import copy
@@ -33,6 +34,15 @@ def has_repair_identity(evidence):
     )
 
 
+def _proposal_fingerprint(operation, parameters, audit_id, finding):
+    payload = json.dumps(
+        {"operation": operation, "parameters": parameters, "audit_id": audit_id,
+         "finding": finding},
+        sort_keys=True, separators=(",", ":"), default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 class RepairWorkflow:
     def __init__(self):
         self.config = Config()
@@ -43,6 +53,14 @@ class RepairWorkflow:
             self.config.AIOPS_SAFETY_REVIEW_MODEL.strip()
             if independent_agent else self.config.DEEPSEEK_MODEL
         ) or self.config.DEEPSEEK_MODEL
+        review_api_key = (
+            self.config.AIOPS_SAFETY_REVIEW_API_KEY.strip()
+            if independent_agent else ""
+        ) or self.config.DEEPSEEK_API_KEY
+        review_api_base = (
+            self.config.AIOPS_SAFETY_REVIEW_API_BASE.strip()
+            if independent_agent else ""
+        ) or self.config.DEEPSEEK_API_BASE
         if independent_agent:
             system_prompt = (
                 "You are an independent OpenTenBase safety-review agent. Make a fresh decision "
@@ -64,7 +82,7 @@ class RepairWorkflow:
             )
         try:
             with OpenAI(
-                api_key=self.config.DEEPSEEK_API_KEY, base_url=self.config.DEEPSEEK_API_BASE,
+                api_key=review_api_key, base_url=review_api_base,
                 timeout=self.config.DEEPSEEK_TIMEOUT_SECONDS, max_retries=0,
             ) as client:
                 response = client.chat.completions.create(
@@ -92,6 +110,11 @@ class RepairWorkflow:
             "reason": reason[:2000],
             "model": review_model,
             "reviewer": "independent_safety_agent" if independent_agent else "model_review",
+            "provider": (
+                self.config.AIOPS_SAFETY_REVIEW_PROVIDER.strip()
+                if independent_agent and self.config.AIOPS_SAFETY_REVIEW_PROVIDER.strip()
+                else ("same_provider_second_review" if independent_agent else "primary_provider")
+            ),
         }
 
     def _ensure_schema(self, kb):
@@ -283,6 +306,10 @@ class RepairWorkflow:
                  "review_role": "independent_safety_agent"},
             ),
         }
+        fingerprint = _proposal_fingerprint(operation, params, audit_id, finding)
+        for review in reviews.values():
+            review["proposal_fingerprint"] = fingerprint
+        reviews["program_review"].update({"reviewer": "program_policy", "reviewed_at": datetime.now(timezone.utc).isoformat()})
         evidence = {**(evidence or {}), **reviews}
         request_id = str(uuid.uuid4())
         kb = OperationsStore()
@@ -369,8 +396,20 @@ class RepairWorkflow:
                     for key in ("program_review", "model_review", "agent_review")
                 ):
                     raise ValueError("Resubmit the proposal for program, model, and agent review before approval")
+                fingerprint = _proposal_fingerprint(operation, params, audit_id, finding)
                 if not (reviews.get("human_approval") or {}).get("approved"):
                     raise ValueError("Human approval must be recorded before execution")
+                reviewed_fingerprints = [
+                    (reviews.get(key) or {}).get("proposal_fingerprint")
+                    for key in ("program_review", "model_review", "agent_review")
+                ]
+                if any(reviewed_fingerprints) and any(
+                    value != fingerprint for value in reviewed_fingerprints
+                ):
+                    raise ValueError("Program, model, and agent reviews do not match the current proposal")
+                if ((reviews.get("human_approval") or {}).get("proposal_fingerprint")
+                        and (reviews.get("human_approval") or {}).get("proposal_fingerprint") != fingerprint):
+                    raise ValueError("Human approval does not match the current proposal")
                 table = _table_name(params["table"])
                 if operation != "analyze_table" or not audit_id or not finding:
                     raise ValueError("Repair request must reference a persisted audit finding")
@@ -603,10 +642,31 @@ class RepairWorkflow:
                 if any((evidence.get(key) or {}).get("approved") is not True
                        for key in ("program_review", "model_review", "agent_review")):
                     raise ValueError("Program, model, and agent reviews must pass before human approval")
+                cur.execute(
+                    "SELECT operation,parameters,audit_id,finding FROM repair_requests WHERE request_id=%s",
+                    (request_id,),
+                )
+                operation, parameters, audit_id, finding = cur.fetchone()
+                fingerprint = _proposal_fingerprint(operation, parameters, audit_id, finding)
+                reviewed_fingerprints = [
+                    (evidence.get(key) or {}).get("proposal_fingerprint")
+                    for key in ("program_review", "model_review", "agent_review")
+                ]
+                if any(reviewed_fingerprints) and any(
+                    value != fingerprint for value in reviewed_fingerprints
+                ):
+                    raise ValueError("Proposal changed after review; resubmit it for all reviews")
+                prior_reviewers = {
+                    (evidence.get(key) or {}).get("reviewer")
+                    for key in ("program_review", "model_review", "agent_review")
+                }
+                if approver in prior_reviewers:
+                    raise PermissionError("Human approver must be distinct from the proposal reviewers")
                 evidence["human_approval"] = {
                     "approved": True,
                     "approver": approver,
                     "approved_at": datetime.now(timezone.utc).isoformat(),
+                    "proposal_fingerprint": fingerprint,
                 }
                 cur.execute(
                     "UPDATE repair_requests SET evidence=%s WHERE request_id=%s AND status='pending'",
