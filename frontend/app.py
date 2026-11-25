@@ -223,7 +223,8 @@ def render_repair_proposal(api_base, audit_id, findings):
         if st.button("创建待审批 ANALYZE 提案", key=f"create-repair-{audit_id}"):
             response = requests.post(
                 f"{api_base}/api/audits/{audit_id}/repair-requests",
-                json={"finding_index": selected_finding, "reason": repair_reason}, timeout=15,
+                json={"finding_index": selected_finding, "reason": repair_reason},
+                timeout=st.session_state.config.AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS,
             )
             if response.ok:
                 proposal = response.json()
@@ -491,6 +492,10 @@ elif page == "🧾 修复审批":
         for item in items:
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 proposal_evidence = item.get("evidence") or {}
+                model_review = proposal_evidence.get("model_review") or {}
+                if model_review.get("approved"):
+                    st.caption("程序校验通过 · Agent 复核通过")
+                    st.text(model_review["reason"])
                 if proposal_evidence.get("proposal_source") == "stale_table_statistics":
                     st.caption("提案来源 · 表统计过时巡检规则")
                 render_analysis_status(proposal_evidence.get("ai_analysis"))

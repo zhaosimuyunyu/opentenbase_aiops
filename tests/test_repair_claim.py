@@ -5,6 +5,27 @@ from backend.engines.repair_workflow import RepairWorkflow
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_approval_cannot_bypass_model_review(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token",
+            DB_USER="auditor", AIOPS_REPAIR_DB_USER="repair_operator",
+        )
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (
+            "analyze_table", {"table": "public.orders"}, "pending", "audit-1", {},
+            {"program_review": {"approved": True}},
+        )
+        module = "backend.engines.repair_workflow"
+        with patch.object(workflow, "_ensure_schema"), patch(
+            f"{module}.OperationsStore", return_value=store
+        ), patch(f"{module}.OpenTenBaseConnector") as connector:
+            with self.assertRaisesRegex(ValueError, "program and model review"):
+                workflow.approve_and_execute("request-1", "operator", "test-token")
+            connector.assert_not_called()
+            store.conn.commit.assert_not_called()
+
     def test_execution_requires_separate_role_before_claiming_request(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(
@@ -53,9 +74,10 @@ class RepairClaimTests(unittest.TestCase):
             "check": "stale_table_statistics",
             "evidence": {"schema": "public", "table": "orders"},
         }
+        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}}
         cursor.fetchone.side_effect = [
-            ("analyze_table", parameters, "pending", "audit-1", finding),
-            ("analyze_table", parameters, "executing", "audit-1", finding),
+            ("analyze_table", parameters, "pending", "audit-1", finding, reviews),
+            ("analyze_table", parameters, "executing", "audit-1", finding, reviews),
         ]
 
         def interrupt():
