@@ -147,11 +147,11 @@ class RepairWorkflow:
             raise ValueError("Repair requires a verified table statistics finding")
         if params["table"] != f"{observation.get('schema')}.{observation.get('table')}":
             raise ValueError("Repair target does not match the audited finding")
-        evidence = {
-            **(evidence or {}),
+        reviews = {
             "program_review": {"approved": True},
             "model_review": self._review_proposal(operation, params["table"], observation),
         }
+        evidence = {**(evidence or {}), **reviews}
         request_id = str(uuid.uuid4())
         kb = OperationsStore()
         try:
@@ -162,7 +162,7 @@ class RepairWorkflow:
                     (audit_id,),
                 )
                 cur.execute(
-                    "SELECT request_id,status,parameters FROM repair_requests "
+                    "SELECT request_id,status,parameters,finding FROM repair_requests "
                     "WHERE audit_id=%s AND operation=%s AND parameters->>'table'=%s "
                     "ORDER BY created_at DESC,request_id DESC LIMIT 1",
                     (audit_id, operation, params["table"]),
@@ -170,10 +170,12 @@ class RepairWorkflow:
                 existing = cur.fetchone()
                 if existing:
                     if existing[1] == "pending":
+                        if existing[3] != finding:
+                            raise ValueError("Pending proposal references a different finding")
                         cur.execute(
-                            "UPDATE repair_requests SET evidence=%s WHERE request_id=%s "
+                            "UPDATE repair_requests SET evidence=evidence || %s WHERE request_id=%s "
                             "AND status='pending' AND NOT (evidence ? 'model_review')",
-                            (Json(evidence), existing[0]),
+                            (Json(reviews), existing[0]),
                         )
                     return {
                         "request_id": existing[0], "status": existing[1],
