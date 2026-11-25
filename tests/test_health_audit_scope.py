@@ -7,6 +7,36 @@ from backend.collectors.readonly_health import stale_statistics_nodes
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lock_finding_notes_missing_official_unlock_diagnostics(self):
+        module = "backend.engines.readonly_audit_engine"
+        snapshot = {
+            "status": "success",
+            "errors": {},
+            "checks": {
+                "locks": [{"granted": False, "locktype": "transactionid"}],
+                "pg_unlock_diagnostics": [{
+                    "package_available": False,
+                    "dependency_registered": False,
+                    "dependency_executable": None,
+                }],
+            },
+        }
+        with patch(f"{module}.OperationsStore"), patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(
+            ReadonlyAuditEngine, "_diagnose",
+            new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []}),
+        ):
+            collector.return_value.collect.return_value = snapshot
+            result = await ReadonlyAuditEngine().run_health_audit()
+
+        item = next(
+            finding for finding in result["findings"]
+            if finding["check"] == "official_lock_diagnostics_unavailable"
+        )
+        self.assertEqual(item["severity"], "low")
+        self.assertIn("not available", item["observed"])
+
     def test_statistics_threshold_is_per_node(self):
         nodes = [
             {"node_name": "dn1", "live_tuples": 2000, "modifications_since_analyze": 600},

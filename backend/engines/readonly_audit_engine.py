@@ -123,6 +123,28 @@ class ReadonlyAuditEngine:
                 'observed': f'{len(blocked_locks)} waiting locks',
                 'evidence': blocked_locks,
             })
+        if 'pg_unlock_diagnostics' in checks and (
+            blocked_locks or checks.get('prepared_transactions')
+            or checks.get('data_node_prepared_transactions')
+        ):
+            unlock_status = (checks.get('pg_unlock_diagnostics') or [{}])[0]
+            unlock_ready = all(
+                unlock_status.get(key) is True
+                for key in ('dependency_registered', 'dependency_executable')
+            )
+            if not unlock_ready:
+                if unlock_status.get('dependency_registered'):
+                    reason = 'pg_unlock_check_dependency is installed but unavailable to the audit account'
+                elif unlock_status.get('package_available'):
+                    reason = 'pg_unlock is available to install, but pg_unlock_check_dependency is not registered'
+                else:
+                    reason = 'pg_unlock_check_dependency is not available on the connected CN'
+                findings.append({
+                    'check': 'official_lock_diagnostics_unavailable',
+                    'severity': 'low',
+                    'observed': reason,
+                    'evidence': unlock_status,
+                })
         for node in checks.get('node_connectivity') or []:
             if node.get('status') == 'unreachable':
                 findings.append({
