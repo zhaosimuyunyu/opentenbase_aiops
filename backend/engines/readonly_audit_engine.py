@@ -208,9 +208,17 @@ class ReadonlyAuditEngine:
             waiting = next(node for node in participants if node.get('waiting_pids'))
             matching_prepared.append({**waiting, 'data_node_participants': participants})
         if matching_prepared:
+            databases = sorted({
+                transaction['database'] for transaction in matching_prepared
+                if transaction.get('database')
+            })
+            observed = f'{len(matching_prepared)} prepared transaction(s) match waiting transaction IDs'
+            if databases:
+                observed += f" (transaction databases: {', '.join(databases)})"
             findings.append({
                 'check': 'prepared_transaction_blocker', 'severity': 'high',
-                'observed': f'{len(matching_prepared)} prepared transaction(s) match waiting transaction IDs',
+                'observed': observed,
+                'transaction_databases': databases,
                 'evidence': matching_prepared,
             })
         for row in checks.get('replication') or []:
