@@ -86,7 +86,7 @@ CHECKS = {
                COALESCE(a.usename, '') AS usename,
                a.state, a.wait_event_type, a.wait_event,
                a.xact_start, a.query_start, COALESCE(a.query, '') AS query,
-               CASE WHEN NOT l.granted THEN pg_blocking_pids(l.pid)
+               CASE WHEN NOT l.granted THEN array_remove(pg_blocking_pids(l.pid), 0)
                     ELSE ARRAY[]::int[] END AS blocker_pids
         FROM pg_locks l
         LEFT JOIN pg_stat_activity a ON a.pid = l.pid

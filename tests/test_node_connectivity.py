@@ -50,6 +50,9 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertIn("pg_unlock_check_deadlock", CHECKS["pg_unlock_diagnostics"])
         self.assertNotIn("pg_unlock_execute", CHECKS["pg_unlock_diagnostics"])
 
+    def test_lock_collection_filters_invalid_open_tenbase_blocker_pid(self):
+        self.assertIn("array_remove(pg_blocking_pids(l.pid), 0)", CHECKS["locks"])
+
     def test_bulk_limit_preserves_partial_status_and_collects_configured_table(self):
         target = "public.orders"
         collector = ReadonlyHealthCollector(SimpleNamespace(AIOPS_AUTO_AUDIT_TARGETS=[target]))
