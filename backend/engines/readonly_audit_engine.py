@@ -254,7 +254,7 @@ class ReadonlyAuditEngine:
             if modifications >= 1000 and modifications >= live * 0.2:
                 findings.append({
                     'check': 'stale_table_statistics', 'severity': 'medium',
-                    'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} has {modifications} modifications since analysis",
+                    'observed': f"{table_stat['schemaname']}.{table_stat['tablename']} has {modifications} modifications since ANALYZE summed across data nodes",
                     'evidence': {
                         'schema': table_stat['schemaname'], 'table': table_stat['tablename'],
                         'live_tuples_estimate': live, 'modifications_since_analyze': modifications,
@@ -262,6 +262,7 @@ class ReadonlyAuditEngine:
                         'database_identity': identity,
                         'audit_target': self.config.audit_target,
                         'statistics_source': source,
+                        'statistics_aggregation': 'data_node_sum',
                     },
                 })
             dead = table_stat.get('dead_tuples') or 0
