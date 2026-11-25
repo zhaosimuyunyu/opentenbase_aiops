@@ -379,6 +379,91 @@ class RepairWorkflow:
             raise ValueError("Query cancellation is unavailable for an empty or internal query")
         return expected
 
+    @staticmethod
+    def _same_session_value(actual, expected):
+        if actual is None or expected is None:
+            return actual == expected
+        if hasattr(actual, "isoformat"):
+            actual = actual.isoformat()
+        return str(actual).replace(" ", "T") == str(expected).replace(" ", "T")
+
+    def _execute_cancel_query(self, parameters, finding):
+        if getattr(self.config, "AIOPS_CANCEL_QUERY_ENABLED", False) is not True:
+            raise ValueError("cancel_query executor is disabled")
+        target = self._lock_target(parameters, finding)
+        repair_config = self._repair_config()
+        coordinator = OpenTenBaseConnector(repair_config)
+        node_connector = None
+        try:
+            coordinator_connection = coordinator.connect()
+            coordinator_connection.set_session(readonly=True, autocommit=False)
+            with coordinator_connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT node_host,node_port FROM pgxc_node "
+                    "WHERE node_name=%s AND node_type='D'",
+                    (target["node_name"],),
+                )
+                node = cursor.fetchone()
+            coordinator_connection.rollback()
+            if not node:
+                raise ValueError("Target data node is not registered")
+            node_config = copy(repair_config)
+            node_config.DB_HOST, node_config.DB_PORT = node
+            node_connector = OpenTenBaseConnector(node_config)
+            connection = node_connector.connect()
+            connection.set_session(readonly=False, autocommit=False)
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout='5s'")
+                cursor.execute("SET LOCAL lock_timeout='1s'")
+                cursor.execute(
+                    "SELECT pid,usename,datname,application_name,query_start::text,"
+                    "xact_start::text,query,backend_type "
+                    "FROM pg_stat_activity WHERE pid=%s",
+                    (target["pid"],),
+                )
+                session = cursor.fetchone()
+                if not session or session[7] != "client backend":
+                    raise ValueError("Blocker session no longer exists or is not a client backend")
+                observed = {
+                    "pid": session[0], "user": session[1], "database": session[2],
+                    "application_name": session[3], "query_start": session[4],
+                    "xact_start": session[5], "query": session[6],
+                }
+                for key in ("pid", "user", "database", "application_name", "query"):
+                    if observed[key] != target[key]:
+                        raise ValueError("Blocker identity changed since approval")
+                for key in ("query_start", "xact_start"):
+                    if not self._same_session_value(observed[key], target[key]):
+                        raise ValueError("Blocker transaction identity changed since approval")
+                cursor.execute("SELECT pg_cancel_backend(%s)", (target["pid"],))
+                cancelled = cursor.fetchone()[0]
+            connection.commit()
+            verified = False
+            for delay in (0, 0.2, 0.5, 1):
+                if delay:
+                    sleep(delay)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT query_start::text,query,state FROM pg_stat_activity WHERE pid=%s",
+                        (target["pid"],),
+                    )
+                    current = cursor.fetchone()
+                connection.rollback()
+                if current is None or not self._same_session_value(current[0], target["query_start"]):
+                    verified = True
+                    break
+            return {
+                "success": bool(cancelled and verified),
+                "operation": "cancel_query",
+                "target": target,
+                "cancel_requested": bool(cancelled),
+                "postcondition": {"query_ended_or_identity_changed": verified},
+            }
+        finally:
+            if node_connector is not None:
+                node_connector.close()
+            coordinator.close()
+
     def _preflight_analyze_target(self, table, observation):
         repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
         if not repair_user or repair_user == self.config.DB_USER:
@@ -690,10 +775,8 @@ class RepairWorkflow:
                     raise ValueError("Human approval does not match the current proposal")
                 if operation == "cancel_query":
                     self._lock_target(params, finding)
-                    raise ValueError(
-                        "cancel_query requires a verified per-data-node cancellation executor; "
-                        "the proposal is retained for review"
-                    )
+                    if getattr(self.config, "AIOPS_CANCEL_QUERY_ENABLED", False) is not True:
+                        raise ValueError("cancel_query executor is disabled")
                 table = _table_name(params["table"])
                 if operation != "analyze_table" or not audit_id or not finding:
                     raise ValueError("Repair request must reference a persisted audit finding")
@@ -730,6 +813,26 @@ class RepairWorkflow:
                 )
                 # Persist the claim before issuing SQL on the separate OpenTenBase connection.
                 kb.conn.commit()
+                if operation == "cancel_query":
+                    try:
+                        result = self._execute_cancel_query(params, finding)
+                        status = "executed" if result["success"] else "unverified"
+                    except Exception as error:
+                        result = {
+                            "success": False, "operation": operation,
+                            "error": str(error), "error_type": type(error).__name__,
+                            "sqlstate": getattr(error, "pgcode", None),
+                        }
+                        status = "failed"
+                    cur.execute(
+                        "UPDATE repair_requests SET status=%s,result=%s WHERE request_id=%s AND status='executing'",
+                        (status, Json(result), request_id),
+                    )
+                    self._record_event(
+                        cur, request_id, "execution_finished", actor=approver,
+                        status=status, event_data=result,
+                    )
+                    return {"request_id": request_id, "status": status, "result": result}
                 repair_config = copy(self.config)
                 repair_config.DB_USER = repair_user
                 repair_config.DB_PASSWORD = repair_config.AIOPS_REPAIR_DB_PASSWORD

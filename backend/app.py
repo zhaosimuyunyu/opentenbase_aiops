@@ -436,7 +436,11 @@ def get_automation_status():
             "automatic_repair_targets": list(config.AIOPS_AUTO_REPAIR_TARGETS),
             "repair_function_enabled": config.AIOPS_REPAIR_FUNCTION_ENABLED,
             "cancel_query_enabled": config.AIOPS_CANCEL_QUERY_ENABLED,
-            "cancel_query_executor_ready": False,
+            "cancel_query_executor_ready": bool(config.AIOPS_CANCEL_QUERY_ENABLED),
+            "cancel_query_executor_status": (
+                "enabled_pending_runtime_verification"
+                if config.AIOPS_CANCEL_QUERY_ENABLED else "disabled_by_configuration"
+            ),
             "repair_function": (
                 f"{config.AIOPS_REPAIR_FUNCTION_SCHEMA}."
                 f"{config.AIOPS_REPAIR_FUNCTION_NAME}"

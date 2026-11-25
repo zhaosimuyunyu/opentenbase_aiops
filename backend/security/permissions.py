@@ -95,6 +95,12 @@ class OperationRegistry:
             "sql_pattern": "SELECT pg_cancel_backend\\(.*\\)",
             "risk": "May interrupt critical operations, irreversible"
         },
+        "cancel_query": {
+            "level": PermissionLevel.DANGEROUS,
+            "description": "Cancel a specific client query on a verified data node",
+            "sql_pattern": "SELECT pg_cancel_backend(?)",
+            "risk": "May interrupt a workload and alter lock behavior, irreversible for the statement",
+        },
         "kill_connection": {
             "level": PermissionLevel.DANGEROUS,
             "description": "Terminate client connection",
