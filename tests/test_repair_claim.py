@@ -198,6 +198,27 @@ class RepairClaimTests(unittest.TestCase):
                 workflow.record_manual_review("request-1", "retry", "checked", "test-token")
             store.assert_not_called()
 
+    def test_manual_review_only_claims_unverified_or_stale_execution(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token"
+        )
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = None
+        module = "backend.engines.repair_workflow"
+        with patch.object(workflow, "_ensure_schema"), patch(
+            f"{module}.OperationsStore", return_value=store
+        ):
+            with self.assertRaisesRegex(ValueError, "not awaiting manual review"):
+                workflow.record_manual_review(
+                    "request-1", "closed_no_retry", "Checked execution", "test-token"
+                )
+        statement = cursor.execute.call_args.args[0]
+        self.assertIn("status='unverified'", statement)
+        self.assertIn("interval '5 minutes'", statement)
+        store.close.assert_called_once()
+
     def test_independent_safety_agent_can_use_separate_model(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(

@@ -632,7 +632,11 @@ class RepairWorkflow:
                        SET manual_review=jsonb_build_object(
                            'disposition', %s::text, 'note', %s::text,
                            'reviewer', %s::text, 'reviewed_at', now())
-                       WHERE request_id=%s AND status IN ('executing', 'unverified')
+                       WHERE request_id=%s AND (
+                           status='unverified' OR
+                           status='executing' AND
+                           COALESCE(approved_at, created_at) < now() - interval '5 minutes'
+                       )
                          AND manual_review IS NULL
                        RETURNING manual_review""",
                     (disposition, note, reviewer, request_id),
@@ -659,7 +663,9 @@ class RepairWorkflow:
                     "SELECT request_id,operation,parameters,evidence,reason,status,created_at,approved_at,approved_by,result,audit_id,finding,manual_review "
                     """FROM repair_requests
                     WHERE (%s::text IS NULL OR status = 'pending' AND %s = 'pending'
-                       OR status IN ('executing', 'unverified') AND manual_review IS NULL AND %s = 'review')
+                       OR (status = 'unverified' OR status = 'executing' AND
+                           COALESCE(approved_at, created_at) < now() - interval '5 minutes')
+                          AND manual_review IS NULL AND %s = 'review')
                     ORDER BY created_at DESC, request_id DESC LIMIT %s OFFSET %s""",
                     (queue, queue, queue, max(1, min(limit, 100)), max(0, offset)),
                 )
