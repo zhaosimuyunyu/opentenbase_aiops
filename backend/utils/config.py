@@ -32,6 +32,7 @@ class Config:
         "https://api.deepseek.com/v1"
     )
     DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    AIOPS_SAFETY_REVIEW_MODEL: str = os.getenv("AIOPS_SAFETY_REVIEW_MODEL", "")
     DEEPSEEK_TIMEOUT_SECONDS: float = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "45"))
     AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS: float = float(
         os.getenv("AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS", "210")

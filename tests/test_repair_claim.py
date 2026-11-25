@@ -110,6 +110,27 @@ class RepairClaimTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 workflow._authorize_decision("first")
 
+    def test_independent_safety_agent_can_use_separate_model(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_SAFETY_REVIEW_MODEL="safety-model",
+            DEEPSEEK_MODEL="diagnosis-model",
+        )
+        response = MagicMock()
+        response.choices = [MagicMock(message=MagicMock(
+            content='{"approved":true,"reason":"Evidence supports the operation."}'
+        ))]
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+        with patch("backend.engines.repair_workflow.OpenAI", return_value=client_context):
+            review = workflow._review_proposal(
+                "analyze_table", "public.orders", {}, {"review_role": "independent_safety_agent"}
+            )
+        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "safety-model")
+        self.assertEqual(review["reviewer"], "independent_safety_agent")
+
     def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token")

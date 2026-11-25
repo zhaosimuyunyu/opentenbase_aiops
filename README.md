@@ -132,6 +132,8 @@ opentenbase-aiops/
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
 
 修复请求的执行顺序是程序校验、模型复核、独立安全审查 Agent、人工批准和执行。人工批准通过 `/api/repairs/{request_id}/human-approval` 单独记录，随后才允许调用批准执行接口。删除库、删表和任意 SQL 不在执行白名单内。
+
+`AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。
 | `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的普通执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |
 | `AIOPS_REPAIR_DB_PASSWORD` | 独立执行账号的密码 | 空 |
 

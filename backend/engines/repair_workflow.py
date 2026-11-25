@@ -39,6 +39,10 @@ class RepairWorkflow:
 
     def _review_proposal(self, operation, table, observation, review_context):
         independent_agent = (review_context or {}).get("review_role") == "independent_safety_agent"
+        review_model = (
+            self.config.AIOPS_SAFETY_REVIEW_MODEL.strip()
+            if independent_agent else self.config.DEEPSEEK_MODEL
+        ) or self.config.DEEPSEEK_MODEL
         if independent_agent:
             system_prompt = (
                 "You are an independent OpenTenBase safety-review agent. Make a fresh decision "
@@ -64,7 +68,7 @@ class RepairWorkflow:
                 timeout=self.config.DEEPSEEK_TIMEOUT_SECONDS, max_retries=0,
             ) as client:
                 response = client.chat.completions.create(
-                    model=self.config.DEEPSEEK_MODEL,
+                    model=review_model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": json.dumps({
@@ -83,7 +87,12 @@ class RepairWorkflow:
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("Independent model review returned no reason")
-        return {"approved": True, "reason": reason[:2000], "model": self.config.DEEPSEEK_MODEL}
+        return {
+            "approved": True,
+            "reason": reason[:2000],
+            "model": review_model,
+            "reviewer": "independent_safety_agent" if independent_agent else "model_review",
+        }
 
     def _ensure_schema(self, kb):
         with kb.conn, kb.conn.cursor() as cur:
