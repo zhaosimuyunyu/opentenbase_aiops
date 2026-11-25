@@ -17,7 +17,11 @@ class AutomationStatusTests(unittest.TestCase):
             {"audit_table": None},
             {"repair_table": None},
         ]
-        with patch("backend.app.OperationsStore", return_value=store), patch.multiple(
+        with patch("backend.app.OperationsStore", return_value=store), patch(
+            "backend.app.RepairWorkflow.readiness", return_value={
+                "executor_ready": True, "ready": True, "targets": {"public.orders": True}
+            }
+        ), patch.multiple(
             "backend.app.config",
             AIOPS_AUTO_AUDIT_ENABLED=True,
             AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=300,
@@ -34,6 +38,8 @@ class AutomationStatusTests(unittest.TestCase):
             status = self._get_status()
 
         self.assertTrue(status["repair_executor_ready"])
+        self.assertTrue(status["repair_readiness"]["ready"])
+        self.assertTrue(status["automatic_repair_ready"])
         self.assertTrue(status["automatic_repair_enabled"])
         self.assertEqual(status["automatic_repair_targets"], ["public.orders"])
         self.assertTrue(status["repair_function_enabled"])
@@ -48,7 +54,12 @@ class AutomationStatusTests(unittest.TestCase):
             {"audit_table": None},
             {"repair_table": None},
         ]
-        with patch("backend.app.OperationsStore", return_value=store), patch.multiple(
+        with patch("backend.app.OperationsStore", return_value=store), patch(
+            "backend.app.RepairWorkflow.readiness", return_value={
+                "executor_ready": False, "ready": False,
+                "reason": "separate_repair_account_not_configured",
+            }
+        ), patch.multiple(
             "backend.app.config",
             AIOPS_AUTO_AUDIT_ENABLED=False,
             AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=900,
@@ -65,6 +76,8 @@ class AutomationStatusTests(unittest.TestCase):
             status = self._get_status()
 
         self.assertFalse(status["repair_executor_ready"])
+        self.assertFalse(status["automatic_repair_ready"])
+        self.assertEqual(status["repair_readiness"]["reason"], "separate_repair_account_not_configured")
         self.assertFalse(status["automatic_repair_enabled"])
         self.assertEqual(status["automatic_repair_targets"], [])
         self.assertFalse(status["repair_function_enabled"])

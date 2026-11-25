@@ -361,6 +361,7 @@ async def stream_readonly_health_audit(
 def get_automation_status():
     kb = None
     try:
+        repair_readiness = RepairWorkflow(config).readiness()
         kb = OperationsStore()
         with kb.conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT to_regclass('public.audit_records') AS audit_table")
@@ -424,10 +425,11 @@ def get_automation_status():
                 )
         return {
             "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
-            "repair_executor_ready": bool(
-                config.AIOPS_REPAIR_DB_USER.strip()
-                and config.AIOPS_REPAIR_DB_USER != config.DB_USER
+            "repair_executor_ready": repair_readiness.get("executor_ready", False),
+            "automatic_repair_ready": bool(
+                config.AIOPS_AUTO_REPAIR_ENABLED and repair_readiness.get("ready")
             ),
+            "repair_readiness": repair_readiness,
             "automatic_repair_enabled": config.AIOPS_AUTO_REPAIR_ENABLED,
             "automatic_repair_targets": list(config.AIOPS_AUTO_REPAIR_TARGETS),
             "repair_function_enabled": config.AIOPS_REPAIR_FUNCTION_ENABLED,

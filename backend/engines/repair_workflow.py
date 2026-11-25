@@ -196,13 +196,87 @@ class RepairWorkflow:
         connection.rollback()
         return allowed is True
 
+    def readiness(self):
+        repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
+        if not repair_user or repair_user == self.config.DB_USER:
+            return {
+                "executor_ready": False, "ready": False,
+                "reason": "separate_repair_account_not_configured",
+            }
+        if not self.config.AIOPS_REPAIR_FUNCTION_ENABLED:
+            return {
+                "executor_ready": False, "ready": False,
+                "reason": "administrator_repair_function_disabled",
+            }
+        connector = OpenTenBaseConnector(self._repair_config())
+        try:
+            connection = connector.connect()
+            connection.set_session(readonly=True, autocommit=False)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT session_user, current_database(), "
+                    "(SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)"
+                )
+                identity = cursor.fetchone()
+            connection.rollback()
+            if identity is None or identity[0] != repair_user or identity[2] is not False:
+                return {
+                    "executor_ready": False, "ready": False,
+                    "reason": "repair_account_must_be_non_superuser",
+                }
+            schema = self.config.AIOPS_REPAIR_FUNCTION_SCHEMA
+            analyze_function = self.config.AIOPS_REPAIR_FUNCTION_NAME
+            functions_ready = all(
+                self._repair_function_available(connection, schema, name)
+                for name in (analyze_function, "is_analyze_target_allowed")
+            )
+            if not functions_ready:
+                return {
+                    "executor_ready": False, "ready": False,
+                    "reason": "repair_functions_missing_or_not_executable",
+                }
+            targets = {}
+            for configured_target in self.config.AIOPS_AUTO_REPAIR_TARGETS:
+                schema_name, table_name = configured_target.split(".", 1)
+                targets[configured_target] = self._repair_target_allowed(
+                    connection, schema, "is_analyze_target_allowed", schema_name, table_name
+                )
+            disallowed = [target for target, allowed in targets.items() if not allowed]
+            reason = None
+            if not targets:
+                reason = "automatic_repair_targets_not_configured"
+            elif disallowed:
+                reason = "targets_missing_from_database_allowlist"
+            return {
+                "executor_ready": True,
+                "ready": bool(targets) and not disallowed,
+                "database": identity[1],
+                "function": f"{schema}.{analyze_function}",
+                "targets": targets,
+                "reason": reason,
+            }
+        except Exception as error:
+            return {
+                "executor_ready": False,
+                "ready": False,
+                "reason": "repair_account_connection_failed",
+                "error_type": type(error).__name__,
+                "sqlstate": getattr(error, "pgcode", None),
+            }
+        finally:
+            connector.close()
+
+    def _repair_config(self):
+        repair_config = copy(self.config)
+        repair_config.DB_USER = self.config.AIOPS_REPAIR_DB_USER.strip()
+        repair_config.DB_PASSWORD = self.config.AIOPS_REPAIR_DB_PASSWORD
+        return repair_config
+
     def _preflight_analyze_target(self, table, observation):
         repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
         if not repair_user or repair_user == self.config.DB_USER:
             raise ValueError("Configure a dedicated AIOPS_REPAIR_DB_USER before creating repair proposals")
-        repair_config = copy(self.config)
-        repair_config.DB_USER = repair_user
-        repair_config.DB_PASSWORD = self.config.AIOPS_REPAIR_DB_PASSWORD
+        repair_config = self._repair_config()
         connector = OpenTenBaseConnector(repair_config)
         try:
             connection = connector.connect()

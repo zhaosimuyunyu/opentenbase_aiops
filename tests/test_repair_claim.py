@@ -64,11 +64,48 @@ class RepairClaimTests(unittest.TestCase):
         self.assertFalse(RepairWorkflow._repair_function_available(
             connection, "aiops_admin", "analyze_table"
         ))
-
         cursor.fetchone.return_value = (True, False)
         self.assertFalse(RepairWorkflow._repair_function_available(
             connection, "aiops_admin", "analyze_table"
         ))
+
+    def test_readiness_checks_database_functions_and_each_configured_target(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_REPAIR_DB_USER="repair_operator",
+            AIOPS_REPAIR_DB_PASSWORD="secret",
+            DB_USER="auditor",
+            DB_NAME="postgres",
+            AIOPS_REPAIR_FUNCTION_ENABLED=True,
+            AIOPS_REPAIR_FUNCTION_SCHEMA="aiops_admin",
+            AIOPS_REPAIR_FUNCTION_NAME="analyze_table",
+            AIOPS_AUTO_REPAIR_TARGETS=("public.orders", "public.items"),
+        )
+        connector = MagicMock()
+        connection = connector.connect.return_value
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = ("repair_operator", "postgres", False)
+        with patch("backend.engines.repair_workflow.OpenTenBaseConnector", return_value=connector), patch.object(
+            workflow, "_repair_function_available", return_value=True
+        ), patch.object(
+            workflow, "_repair_target_allowed", side_effect=[True, False]
+        ):
+            readiness = workflow.readiness()
+
+        self.assertTrue(readiness["executor_ready"])
+        self.assertFalse(readiness["ready"])
+        self.assertEqual(readiness["reason"], "targets_missing_from_database_allowlist")
+        self.assertEqual(readiness["targets"], {"public.orders": True, "public.items": False})
+        connector.close.assert_called_once()
+
+    def test_readiness_stops_when_repair_account_is_not_configured(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(AIOPS_REPAIR_DB_USER="", DB_USER="auditor")
+        with patch("backend.engines.repair_workflow.OpenTenBaseConnector") as connector:
+            readiness = workflow.readiness()
+        self.assertEqual(readiness["reason"], "separate_repair_account_not_configured")
+        self.assertFalse(readiness["executor_ready"])
+        connector.assert_not_called()
 
     def test_missing_repair_role_blocks_proposal_before_model_or_storage(self):
         workflow = RepairWorkflow()

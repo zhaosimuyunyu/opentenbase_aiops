@@ -410,13 +410,23 @@ elif page == "🛡️ 只读巡检":
         automation = requests.get(f"{api_base}/api/automation/status", timeout=10).json()
         mode = "已启用" if automation["automatic_health_audit_enabled"] else "已关闭"
         st.caption(f"周期巡检{mode} · 间隔 {automation['interval_seconds']} 秒")
-        if not automation.get("repair_executor_ready"):
-            st.warning("修复执行账号未配置。系统会生成只读审计和建议，但不会创建可执行的修复审批请求。")
-        if automation.get("automatic_repair_enabled"):
-            st.caption(
-                "定时自动修复已启用 · 目标 "
-                + (", ".join(automation.get("automatic_repair_targets") or []) or "未配置")
+        repair_readiness = automation.get("repair_readiness") or {}
+        if not repair_readiness.get("executor_ready"):
+            st.warning(
+                "修复执行账号或数据库函数未就绪。系统会生成审计和建议，但不会执行数据库修复。"
             )
+            if repair_readiness.get("reason"):
+                st.caption(f"未就绪原因：{repair_readiness['reason']}")
+        elif automation.get("automatic_repair_enabled") and not repair_readiness.get("ready"):
+            st.warning("自动修复目标尚未通过数据库管理员白名单检查。")
+            if repair_readiness.get("reason"):
+                st.caption(f"未就绪原因：{repair_readiness['reason']}")
+        if automation.get("automatic_repair_enabled"):
+            if automation.get("automatic_repair_ready"):
+                st.caption(
+                    "定时自动修复已就绪 · 目标 "
+                    + (", ".join(automation.get("automatic_repair_targets") or []) or "未配置")
+                )
     except Exception as error:
         st.warning(f"读取周期巡检状态失败: {error}")
     statistics_target = st.text_input("目标表（可选）", placeholder="public.orders").strip()
