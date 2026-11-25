@@ -579,6 +579,15 @@ def list_repair_requests(
         raise HTTPException(status_code=503, detail="Repair storage is unavailable") from error
 
 
+@app.get("/api/repairs/{request_id}/events")
+def list_repair_events(request_id: str, limit: int = 200):
+    try:
+        return {"items": RepairWorkflow().list_events(request_id, limit)}
+    except Exception as error:
+        logger.exception("Failed to list repair request events")
+        raise HTTPException(status_code=503, detail="Repair event storage is unavailable") from error
+
+
 @app.post("/api/repairs/{request_id}/approve")
 def approve_repair_request(request_id: str, request: RepairApprovalRequest):
     try:

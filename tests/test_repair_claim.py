@@ -7,6 +7,22 @@ from backend.capabilities import CAPABILITIES
 
 
 class RepairClaimTests(unittest.TestCase):
+    def test_repair_event_reader_filters_by_request_and_bounds_limit(self):
+        workflow = RepairWorkflow()
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.description = [(name,) for name in (
+            "event_id", "request_id", "event_type", "actor", "status", "event_data", "created_at"
+        )]
+        cursor.fetchall.return_value = [(1, "request-1", "proposal_created", None, "pending", {}, None)]
+        with patch.object(workflow, "_ensure_schema"), patch(
+            "backend.engines.repair_workflow.OperationsStore", return_value=store
+        ):
+            events = workflow.list_events("request-1", limit=9999)
+        self.assertEqual(events[0]["event_type"], "proposal_created")
+        self.assertEqual(cursor.execute.call_args.args[1], ("request-1", 500))
+        store.close.assert_called_once()
+
     def test_capabilities_declare_only_verified_repair_executor(self):
         value = CAPABILITIES
         repairs = value["repairs"]

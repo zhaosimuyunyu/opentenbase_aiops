@@ -120,13 +120,15 @@ class RepairWorkflow:
     def _ensure_schema(self, kb):
         with kb.conn, kb.conn.cursor() as cur:
             cur.execute("""
-                SELECT count(*) FROM pg_catalog.pg_attribute
-                WHERE attrelid = to_regclass('repair_requests')
-                  AND attname IN ('audit_id', 'finding', 'manual_review', 'agent_review')
-                  AND NOT attisdropped
+                SELECT
+                    (SELECT count(*) FROM pg_catalog.pg_attribute
+                     WHERE attrelid = to_regclass('repair_requests')
+                       AND attname IN ('audit_id', 'finding', 'manual_review', 'agent_review')
+                       AND NOT attisdropped),
+                    to_regclass('repair_request_events') IS NOT NULL
             """)
             columns = cur.fetchone()
-            if columns and columns[0] == 4:
+            if columns and columns[0] == 4 and columns[1]:
                 return
             cur.execute("SELECT pg_advisory_xact_lock(hashtext('aiops.repair_requests.schema'))")
             cur.execute("""CREATE TABLE IF NOT EXISTS repair_requests(
@@ -138,6 +140,27 @@ class RepairWorkflow:
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS finding jsonb")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS manual_review jsonb")
             cur.execute("ALTER TABLE repair_requests ADD COLUMN IF NOT EXISTS agent_review jsonb")
+            cur.execute("""CREATE TABLE IF NOT EXISTS repair_request_events(
+                event_id bigserial primary key,
+                request_id text not null,
+                event_type text not null,
+                actor text,
+                status text,
+                event_data jsonb not null default '{}'::jsonb,
+                created_at timestamptz not null default now()
+            )""")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_repair_request_events_request "
+                "ON repair_request_events(request_id, event_id)"
+            )
+
+    @staticmethod
+    def _record_event(cursor, request_id, event_type, actor=None, status=None, event_data=None):
+        cursor.execute(
+            "INSERT INTO repair_request_events(request_id,event_type,actor,status,event_data) "
+            "VALUES(%s,%s,%s,%s,%s)",
+            (request_id, event_type, actor, status, Json(event_data or {})),
+        )
 
     @staticmethod
     def _read_data_node_stats(connection, schema_name, table_name, execution_user=None):
@@ -342,6 +365,10 @@ class RepairWorkflow:
                     (request_id, operation, Json(params), Json(evidence or {}), reason,
                      audit_id, Json(finding) if finding else None),
                 )
+                self._record_event(
+                    cur, request_id, "proposal_created", status="pending",
+                    event_data={"operation": operation, "parameters": params, "audit_id": audit_id},
+                )
         finally:
             kb.close()
         return {"request_id": request_id, "status": "pending", "operation": operation, "parameters": params}
@@ -426,6 +453,10 @@ class RepairWorkflow:
                     expected_table = f"{expected['schema']}.{expected['table']}"
                     if table != expected_table:
                         raise ValueError("Repair target does not match the audited finding")
+                self._record_event(
+                    cur, request_id, "execution_claimed", actor=approver,
+                    status="executing", event_data={"operation": operation, "parameters": params},
+                )
                 cur.execute(
                     "UPDATE repair_requests SET status='executing',approved_at=now(),approved_by=%s "
                     "WHERE request_id=%s",
@@ -604,6 +635,10 @@ class RepairWorkflow:
                     "WHERE request_id=%s AND status='executing'",
                     (status, Json(result), request_id),
                 )
+                self._record_event(
+                    cur, request_id, "execution_finished", actor=approver,
+                    status=status, event_data=result,
+                )
                 return {"request_id": request_id, "status": status, "result": result}
         finally:
             kb.close()
@@ -621,6 +656,10 @@ class RepairWorkflow:
                 )
                 if not cur.fetchone():
                     raise ValueError("Repair request is missing or is not pending")
+                self._record_event(
+                    cur, request_id, "request_rejected", actor=approver,
+                    status="rejected", event_data={"reason": reason},
+                )
                 return {"request_id": request_id, "status": "rejected"}
         finally:
             kb.close()
@@ -672,6 +711,10 @@ class RepairWorkflow:
                     "UPDATE repair_requests SET evidence=%s WHERE request_id=%s AND status='pending'",
                     (Json(evidence), request_id),
                 )
+                self._record_event(
+                    cur, request_id, "human_approval_recorded", actor=approver,
+                    status="pending", event_data=evidence["human_approval"],
+                )
                 return {"request_id": request_id, "human_approval": evidence["human_approval"]}
         finally:
             kb.close()
@@ -710,6 +753,11 @@ class RepairWorkflow:
                         "AND manual_review IS NOT NULL AND status IN ('executing', 'unverified')",
                         (request_id,),
                     )
+                self._record_event(
+                    cur, request_id, "manual_review_recorded", actor=reviewer,
+                    status="closed" if disposition == "closed_no_retry" else "unverified",
+                    event_data={"disposition": disposition, "note": note},
+                )
                 return {"request_id": request_id, "status": "closed" if disposition == "closed_no_retry" else "unverified", "manual_review": row[0]}
         finally:
             kb.close()
@@ -728,6 +776,22 @@ class RepairWorkflow:
                           AND manual_review IS NULL AND %s = 'review')
                     ORDER BY created_at DESC, request_id DESC LIMIT %s OFFSET %s""",
                     (queue, queue, queue, max(1, min(limit, 100)), max(0, offset)),
+                )
+                columns = [item[0] for item in cur.description]
+                return [dict(zip(columns, row)) for row in cur.fetchall()]
+        finally:
+            kb.close()
+
+    def list_events(self, request_id, limit=200):
+        kb = OperationsStore()
+        try:
+            self._ensure_schema(kb)
+            with kb.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT event_id,request_id,event_type,actor,status,event_data,created_at "
+                    "FROM repair_request_events WHERE request_id=%s "
+                    "ORDER BY event_id ASC LIMIT %s",
+                    (request_id, max(1, min(limit, 500))),
                 )
                 columns = [item[0] for item in cur.description]
                 return [dict(zip(columns, row)) for row in cur.fetchall()]
