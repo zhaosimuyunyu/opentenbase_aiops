@@ -188,6 +188,16 @@ class RepairClaimTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 workflow._authorize_decision("first")
 
+    def test_manual_review_requires_valid_disposition_before_storage(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token"
+        )
+        with patch("backend.engines.repair_workflow.OperationsStore") as store:
+            with self.assertRaisesRegex(ValueError, "disposition"):
+                workflow.record_manual_review("request-1", "retry", "checked", "test-token")
+            store.assert_not_called()
+
     def test_independent_safety_agent_can_use_separate_model(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(

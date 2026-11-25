@@ -549,6 +549,8 @@ elif page == "🧾 修复审批":
                     st.warning("执行结果尚未入库。进程中断时此状态可能保留，请核对目标库统计和服务日志。")
                 elif item["status"] == "unverified":
                     st.warning("执行结果未通过复查，请核对各 DN 的统计时间戳。")
+                elif item["status"] == "closed":
+                    st.info("人工复核后已关闭，不会自动重试。")
                 elif item["status"] == "failed":
                     st.error("修复执行失败")
                 if item.get("result") is not None:
@@ -561,12 +563,17 @@ elif page == "🧾 修复审批":
                     st.json(item["manual_review"])
                 elif item["status"] in {"executing", "unverified"}:
                     with st.form(f"review-{item['request_id']}"):
+                        disposition = st.selectbox(
+                            "复核处置",
+                            options=["confirmed", "closed_no_retry"],
+                            format_func=lambda value: "确认已核查" if value == "confirmed" else "关闭且不重试",
+                        )
                         note = st.text_area("复核结论与依据", max_chars=4000)
                         review_token = st.text_input("审批令牌", type="password")
-                        if st.form_submit_button("保存复核记录"):
+                        if st.form_submit_button("提交人工复核"):
                             response = requests.post(
                                 f"{api_base}/api/repairs/{item['request_id']}/manual-review",
-                                json={"note": note, "token": review_token}, timeout=10,
+                                json={"disposition": disposition, "note": note, "token": review_token}, timeout=10,
                             )
                             if response.ok:
                                 st.rerun()

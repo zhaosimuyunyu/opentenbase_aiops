@@ -619,6 +619,7 @@ def reject_repair_request(request_id: str, request: RepairRejectionRequest):
 
 
 class RepairManualReviewRequest(BaseModel):
+    disposition: Literal["confirmed", "closed_no_retry"]
     note: str
     token: str
 
@@ -626,7 +627,9 @@ class RepairManualReviewRequest(BaseModel):
 @app.post("/api/repairs/{request_id}/manual-review")
 def record_repair_manual_review(request_id: str, request: RepairManualReviewRequest):
     try:
-        return RepairWorkflow().record_manual_review(request_id, request.note, request.token)
+        return RepairWorkflow().record_manual_review(
+            request_id, request.disposition, request.note, request.token
+        )
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except ValueError as error:

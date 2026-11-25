@@ -616,8 +616,10 @@ class RepairWorkflow:
         finally:
             kb.close()
 
-    def record_manual_review(self, request_id, note, token):
+    def record_manual_review(self, request_id, disposition, note, token):
         reviewer = self._authorize_decision(token)
+        if disposition not in {"confirmed", "closed_no_retry"}:
+            raise ValueError("Manual review disposition must be confirmed or closed_no_retry")
         note = note.strip()
         if not 1 <= len(note) <= 4000:
             raise ValueError("Review note must contain 1 to 4000 characters")
@@ -628,16 +630,23 @@ class RepairWorkflow:
                 cur.execute(
                     """UPDATE repair_requests
                        SET manual_review=jsonb_build_object(
-                           'note', %s::text, 'reviewer', %s::text, 'reviewed_at', now())
+                           'disposition', %s::text, 'note', %s::text,
+                           'reviewer', %s::text, 'reviewed_at', now())
                        WHERE request_id=%s AND status IN ('executing', 'unverified')
                          AND manual_review IS NULL
                        RETURNING manual_review""",
-                    (note, reviewer, request_id),
+                    (disposition, note, reviewer, request_id),
                 )
                 row = cur.fetchone()
                 if row is None:
                     raise ValueError("Repair request is not awaiting manual review")
-                return {"request_id": request_id, "manual_review": row[0]}
+                if disposition == "closed_no_retry":
+                    cur.execute(
+                        "UPDATE repair_requests SET status='closed' WHERE request_id=%s "
+                        "AND manual_review IS NOT NULL AND status IN ('executing', 'unverified')",
+                        (request_id,),
+                    )
+                return {"request_id": request_id, "status": "closed" if disposition == "closed_no_retry" else "unverified", "manual_review": row[0]}
         finally:
             kb.close()
 
