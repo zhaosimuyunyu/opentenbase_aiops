@@ -489,6 +489,17 @@ class RepairClaimTests(unittest.TestCase):
                 workflow.approve_and_execute("request-1", "operator", "test-token")
         store.close.assert_called_once()
 
+    def test_cancel_query_executor_requires_explicit_enablement(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_CANCEL_QUERY_ENABLED=False,
+            AIOPS_REPAIR_DB_USER="repair_operator",
+            AIOPS_REPAIR_DB_PASSWORD="secret",
+            DB_USER="auditor",
+        )
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            workflow._execute_cancel_query({}, {"check": "data_node_lock_waits", "evidence": {}})
+
     def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token")

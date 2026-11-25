@@ -436,10 +436,19 @@ def get_automation_status():
             "automatic_repair_targets": list(config.AIOPS_AUTO_REPAIR_TARGETS),
             "repair_function_enabled": config.AIOPS_REPAIR_FUNCTION_ENABLED,
             "cancel_query_enabled": config.AIOPS_CANCEL_QUERY_ENABLED,
-            "cancel_query_executor_ready": bool(config.AIOPS_CANCEL_QUERY_ENABLED),
+            "cancel_query_executor_ready": bool(
+                config.AIOPS_CANCEL_QUERY_ENABLED
+                and config.AIOPS_REPAIR_DB_USER
+                and config.AIOPS_REPAIR_DB_PASSWORD
+                and config.AIOPS_REPAIR_DB_USER != config.DB_USER
+            ),
             "cancel_query_executor_status": (
-                "enabled_pending_runtime_verification"
-                if config.AIOPS_CANCEL_QUERY_ENABLED else "disabled_by_configuration"
+                "ready_for_runtime_probe"
+                if config.AIOPS_CANCEL_QUERY_ENABLED
+                and config.AIOPS_REPAIR_DB_USER
+                and config.AIOPS_REPAIR_DB_PASSWORD
+                and config.AIOPS_REPAIR_DB_USER != config.DB_USER
+                else "disabled_or_repair_account_missing"
             ),
             "repair_function": (
                 f"{config.AIOPS_REPAIR_FUNCTION_SCHEMA}."
