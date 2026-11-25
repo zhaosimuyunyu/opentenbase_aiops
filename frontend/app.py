@@ -141,6 +141,23 @@ def render_analysis_status(analysis):
 
 
 def render_collection_status(evidence):
+    diagnostics = (evidence.get("cluster") or {}).get("pg_clean_diagnostics") or []
+    if diagnostics and any(
+        finding.get("check") == "prepared_transaction_blocker"
+        for finding in evidence.get("findings", [])
+    ):
+        diagnostic = diagnostics[0]
+        if not diagnostic.get("registered"):
+            message = "当前库未注册 pg_clean 诊断函数"
+            if diagnostic.get("package_available") is False:
+                message += "，服务端缺少扩展安装包"
+            if diagnostic.get("launcher_setting") == "on":
+                message += "。后台清理器已启用"
+            st.warning(message)
+        elif diagnostic.get("executable") is False:
+            st.warning("巡检账号缺少 pg_clean 诊断函数的执行权限")
+        elif diagnostic.get("executable") is True:
+            st.caption("pg_clean 诊断入口已注册，巡检账号具有执行权限")
     errors = evidence.get("collection_errors") or {}
     status = evidence.get("collection_status")
     if not errors and status not in {"partial", "error"}:
