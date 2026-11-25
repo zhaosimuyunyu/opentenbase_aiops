@@ -517,6 +517,21 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
             {
                 "proposal_source": "stale_table_statistics",
                 "observation": evidence,
+                "review_context": {
+                    "collection_status": audit_evidence.get("collection_status"),
+                    "failed_checks": sorted(audit_evidence.get("collection_errors") or {}),
+                    "cluster_lock_wait_observed": any(
+                        item.get("check") == "lock_waits" for item in findings
+                    ),
+                    "prepared_blocker_in_target_database": any(
+                        item.get("check") == "prepared_transaction_blocker"
+                        and any(
+                            transaction.get("database") == evidence["database_identity"]["database"]
+                            for transaction in item.get("evidence", [])
+                        )
+                        for item in findings
+                    ),
+                },
                 "ai_analysis": record["ai_analysis"],
                 "knowledge_refs": record["knowledge_refs"] if isinstance(record["knowledge_refs"], list) else [],
             }, request.reason,
