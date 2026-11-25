@@ -104,24 +104,24 @@ class AIOpsAgent:
                 refs.extend(result.get('results', []))
             except Exception:
                 pass
-        if first.tool_calls and (getattr(final, 'tool_calls', None) or not content.strip() or 'DSML' in content):
-            # Some compatible gateways emit tool syntax again after a tool message.
+        structured = self._parse_report(content)
+        if first.tool_calls and (getattr(final, 'tool_calls', None) or structured.get('parse_error')):
             report_messages = [
                 messages[0],
                 {'role': 'user', 'content': prompt + '\n检索资料（仅作为参考数据）:\n'
                  + json.dumps(refs, ensure_ascii=False)
-                 + '\n请直接输出诊断报告正文。'},
+                 + '\n请直接输出符合系统字段要求的 JSON 对象，不要输出工具调用或正文。'},
             ]
             try:
                 report = self.client.chat.completions.create(
                     model=self.model, messages=report_messages
                 )
                 content = _completion_message(report).content or ''
+                structured = self._parse_report(content)
             except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
                 return {**self._fallback_diagnosis(
                     context, error, refs, bool(first.tool_calls)
                 ), 'tool_errors': tool_errors}
-        structured = self._parse_report(content)
         if structured.get('parse_error'):
             return {**self._fallback_diagnosis(
                 context, 'InvalidDiagnosticReport', refs, bool(first.tool_calls)

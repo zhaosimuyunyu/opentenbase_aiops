@@ -75,6 +75,7 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
             new=Mock(side_effect=[
                 SimpleNamespace(choices=[SimpleNamespace(message=first)]),
                 SimpleNamespace(choices=final_choices),
+                SimpleNamespace(choices=final_choices),
             ]),
         ) as completion, patch(
             "backend.ai.agent_client.execute_search_knowledge",
