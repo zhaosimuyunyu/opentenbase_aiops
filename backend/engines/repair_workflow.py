@@ -185,6 +185,54 @@ class RepairWorkflow:
                 + ", ".join(unauthorized_nodes)
             )
 
+    def _preflight_analyze_target(self, table, observation):
+        repair_user = self.config.AIOPS_REPAIR_DB_USER.strip()
+        if not repair_user or repair_user == self.config.DB_USER:
+            raise ValueError("Configure a dedicated AIOPS_REPAIR_DB_USER before creating repair proposals")
+        repair_config = copy(self.config)
+        repair_config.DB_USER = repair_user
+        repair_config.DB_PASSWORD = self.config.AIOPS_REPAIR_DB_PASSWORD
+        connector = OpenTenBaseConnector(repair_config)
+        try:
+            connection = connector.connect()
+            connection.set_session(readonly=True, autocommit=False)
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = '5s'")
+                cursor.execute("SET LOCAL lock_timeout = '1s'")
+                cursor.execute(
+                    "SELECT system_identifier::text, current_database(), session_user, "
+                    "(SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user) "
+                    "FROM pg_catalog.pg_control_system()"
+                )
+                identity = cursor.fetchone()
+            connection.rollback()
+            audited_identity = observation.get("database_identity") or {}
+            if identity is None or identity[:2] != (
+                audited_identity.get("system_identifier"), audited_identity.get("database")
+            ):
+                raise ValueError("Repair account connection does not match the audited database")
+            if identity[2] != repair_user or identity[3] is not False:
+                raise ValueError("Repair proposals require the configured dedicated non-superuser account")
+            schema_name, table_name = table.split(".", 1)
+            stats = self._read_data_node_stats(
+                connection, schema_name, table_name, execution_user=repair_user
+            )
+            audited_relations = {
+                item["node_name"]: item.get("relation_oid")
+                for item in observation.get("nodes", [])
+            }
+            current_relations = {
+                item["node_name"]: item["relation_oid"] for item in stats["nodes"]
+            }
+            if not audited_relations or audited_relations != current_relations:
+                raise ValueError("Audited table identity or data-node coverage changed; rerun the health audit")
+            self._require_analyze_ownership(stats["nodes"])
+            stale_nodes = stale_statistics_nodes(stats["nodes"])
+            if not stale_nodes:
+                raise ValueError("The original ANALYZE finding is no longer present")
+        finally:
+            connector.close()
+
     def create_request(self, operation, parameters, evidence, reason, audit_id=None, finding=None):
         if operation not in ALLOWED_OPERATIONS:
             raise ValueError("Operation is not enabled for execution")
@@ -197,6 +245,7 @@ class RepairWorkflow:
             raise ValueError("Repair requires a verified table statistics finding")
         if params["table"] != f"{observation.get('schema')}.{observation.get('table')}":
             raise ValueError("Repair target does not match the audited finding")
+        self._preflight_analyze_target(params["table"], observation)
         lookup = """
             SELECT request_id,status,parameters,finding,evidence
             FROM repair_requests

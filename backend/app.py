@@ -348,6 +348,10 @@ def get_automation_status():
                 )
         return {
             "automatic_health_audit_enabled": config.AIOPS_AUTO_AUDIT_ENABLED,
+            "repair_executor_ready": bool(
+                config.AIOPS_REPAIR_DB_USER.strip()
+                and config.AIOPS_REPAIR_DB_USER != config.DB_USER
+            ),
             "interval_seconds": config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
             "statistics_target": config.AIOPS_AUTO_AUDIT_TABLE,
             "latest_audit": dict(latest) if latest else None,

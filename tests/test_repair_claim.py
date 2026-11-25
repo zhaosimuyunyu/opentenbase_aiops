@@ -33,6 +33,55 @@ class RepairClaimTests(unittest.TestCase):
         nodes[1]["execution_user_is_owner"] = True
         RepairWorkflow._require_analyze_ownership(nodes)
 
+    def test_missing_repair_role_blocks_proposal_before_model_or_storage(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_REPAIR_DB_USER="", DB_USER="auditor",
+        )
+        with patch.object(workflow, "_review_proposal") as review, patch(
+            "backend.engines.repair_workflow.OperationsStore"
+        ) as store:
+            with self.assertRaisesRegex(ValueError, "AIOPS_REPAIR_DB_USER"):
+                workflow.create_request(
+                    "analyze_table", {"table": "public.orders"}, {}, "test",
+                    "audit-1", {
+                        "check": "stale_table_statistics",
+                        "evidence": {
+                            "schema": "public", "table": "orders",
+                            "database_identity": {"system_identifier": "fixture", "database": "lab"},
+                            "nodes": [{"node_name": "dn1", "relation_oid": 123}],
+                        },
+                    },
+                )
+            review.assert_not_called()
+            store.assert_not_called()
+
+    def test_proposal_preflight_checks_database_identity_and_target_before_model(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_REPAIR_DB_USER="repair_operator", AIOPS_REPAIR_DB_PASSWORD="secret",
+            DB_USER="auditor", DB_PASSWORD="audit-secret", DB_HOST="cn", DB_PORT=11003,
+            DB_NAME="lab", audit_target={"host": "cn", "port": 11003, "database": "lab"},
+        )
+        finding = {
+            "check": "stale_table_statistics",
+            "evidence": {
+                "schema": "public", "table": "orders",
+                "database_identity": {"system_identifier": "fixture", "database": "lab"},
+                "nodes": [{"node_name": "dn1", "relation_oid": 123}],
+            },
+        }
+        with patch.object(workflow, "_preflight_analyze_target", side_effect=ValueError("preflight failed")) as preflight, patch.object(
+            workflow, "_review_proposal"
+        ) as review, patch("backend.engines.repair_workflow.OperationsStore") as store:
+            with self.assertRaisesRegex(ValueError, "preflight failed"):
+                workflow.create_request(
+                    "analyze_table", {"table": "public.orders"}, {}, "test", "audit-1", finding
+                )
+        preflight.assert_called_once_with("public.orders", finding["evidence"])
+        review.assert_not_called()
+        store.assert_not_called()
+
     def test_destructive_proposals_are_blocked_before_model_or_database(self):
         workflow = RepairWorkflow()
         module = "backend.engines.repair_workflow"
@@ -61,7 +110,8 @@ class RepairClaimTests(unittest.TestCase):
         }
         reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}, "agent_review": {"approved": True}, "human_approval": {"approved": True}}
         cursor.fetchone.return_value = ("request-1", "pending", parameters, finding, reviews)
-        with patch.object(workflow, "_ensure_schema"), patch.object(
+        with patch.object(workflow, "_preflight_analyze_target"), patch.object(
+            workflow, "_ensure_schema"), patch.object(
             workflow, "_review_proposal"
         ) as review, patch("backend.engines.repair_workflow.OperationsStore", return_value=store):
             result = workflow.create_request("analyze_table", parameters, {}, "retry", "audit-1", finding)
