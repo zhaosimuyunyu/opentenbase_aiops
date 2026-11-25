@@ -128,7 +128,7 @@ class ReadonlyAuditEngine:
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
                     'table_stats', 'index_usage', 'storage', 'data_node_table_stats',
-                    'data_node_stats_fallback')}
+                    'data_node_stats_fallback', 'data_node_lock_blockers')}
         findings = []
         lock_rows = checks.get('locks')
         blocked_locks = [row for row in lock_rows or [] if not row['granted']]
@@ -358,12 +358,13 @@ class ReadonlyAuditEngine:
         cluster_checks = {
             'nodes', 'connections', 'max_connections', 'replication',
             'database_info', 'database_identity', 'prepared_transactions', 'pg_clean_diagnostics',
-                    'pg_unlock_diagnostics', 'data_node_lock_blockers', 'key_guc',
+                    'pg_unlock_diagnostics', 'key_guc',
         }
         performance_checks = {
             'locks', 'long_running_queries', 'idle_transactions',
             'table_stats', 'index_usage',
             'storage',
+            'data_node_lock_blockers',
         }
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
         cluster_node_errors = {
@@ -373,7 +374,8 @@ class ReadonlyAuditEngine:
         cluster_errors.update(cluster_node_errors)
         performance_errors = performance_checks.intersection(snapshot['errors'])
         performance_node_errors = {
-            name for name in snapshot['errors'] if name.startswith('data_node_stats:')
+            name for name in snapshot['errors']
+            if name.startswith(('data_node_stats:', 'data_node_lock_blockers:'))
         }
         performance_errors.update(performance_node_errors)
         unreachable_nodes = any(

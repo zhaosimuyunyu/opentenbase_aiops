@@ -45,6 +45,36 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         persisted = store.return_value.conn.cursor.return_value.__enter__
         self.assertTrue(persisted.return_value.execute.called)
 
+    async def test_persists_data_node_lock_blockers_in_performance_evidence(self):
+        module = "backend.engines.readonly_audit_engine"
+        engine = ReadonlyAuditEngine()
+        snapshot = {
+            "status": "success", "errors": {},
+            "checks": {
+                "locks": [], "connections": [], "max_connections": [{"max_connections": 100}],
+                "long_running_queries": [], "idle_transactions": [], "nodes": [],
+                "data_node_lock_blockers": [{
+                    "node_name": "dn1", "waiting_pid": 10, "pid": 20,
+                    "locktype": "relation", "relation": "public.items",
+                    "transactionid": None, "waiting_mode": "AccessShareLock",
+                    "usename": "app", "database": "postgres", "application_name": "worker",
+                    "query_start": "2026-01-01T00:00:00Z", "xact_start": "2026-01-01T00:00:00Z",
+                    "query": "UPDATE public.items SET value=1", "backend_type": "client backend",
+                }],
+            },
+        }
+        with patch(f"{module}.OperationsStore"), patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(
+            engine, "_diagnose", new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []})
+        ):
+            collector.return_value.collect.return_value = snapshot
+            result = await engine.run_health_audit()
+        self.assertEqual(
+            result["evidence"]["performance"]["data_node_lock_blockers"],
+            snapshot["checks"]["data_node_lock_blockers"],
+        )
+
     async def test_prepared_transaction_reports_missing_official_record_diagnostic(self):
         module = "backend.engines.readonly_audit_engine"
         snapshot = {
