@@ -4,27 +4,27 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from backend.utils.db_connector import OpenTenBaseConnector
+from backend.collectors.readonly_health import ReadonlyHealthCollector
 
-db = OpenTenBaseConnector()
-try:
-    waits = db.execute_query("""
-        SELECT transactionid::text AS transaction_id, pid, mode, granted
-        FROM pg_locks
-        WHERE transactionid IS NOT NULL
-          AND granted = false
-    """) or []
-    xids = sorted({row["transaction_id"] for row in waits})
-    prepared = db.execute_query("""
-        SELECT transaction::text AS transaction_id, gid, prepared, owner, database
-        FROM pg_prepared_xacts
-    """) or []
-    matching = [row for row in prepared if row["transaction_id"] in xids]
-    print(json.dumps({
-        "waiting_transaction_ids": xids,
-        "matching_prepared_transactions": matching,
-        "verified": bool(matching),
-    }, ensure_ascii=False, indent=2, default=str))
-    raise SystemExit(0 if matching else 1)
-finally:
-    db.close()
+snapshot = ReadonlyHealthCollector().collect()
+checks = snapshot["checks"]
+xids = {
+    str(row["transactionid"]) for row in checks.get("locks", [])
+    if row.get("transactionid") and not row["granted"]
+}
+matching = [
+    row for row in checks.get("prepared_transactions", [])
+    if str(row["transaction_id"]) in xids
+]
+participants = checks.get("data_node_prepared_transactions", [])
+blocked_gids = {row["gid"] for row in matching}
+blocked_gids.update(row["gid"] for row in participants if row.get("waiting_pids"))
+print(json.dumps({
+    "waiting_transaction_ids": sorted(xids),
+    "matching_prepared_transactions": matching,
+    "data_node_participants": [row for row in participants if row["gid"] in blocked_gids],
+    "collection_status": snapshot["status"],
+    "collection_errors": snapshot["errors"],
+    "verified": bool(blocked_gids),
+}, ensure_ascii=False, indent=2, default=str))
+raise SystemExit(0 if blocked_gids else 1)
