@@ -29,7 +29,7 @@ scripts/verify_otb_compatibility.py 对 AIOps 使用的 PostgreSQL 兼容接口�
 2. 调用 `POST /api/audits/{audit_id}/repair-requests`，用该发现的零基索引作为 `finding_index`，填写 `reason`。确认提案为 `pending` 且引用原始巡检结果。当前 `ANALYZE` 提案由统计规则生成，模型诊断随提案保存。
 3. 由具名审批人审批，使用审批页或 `POST /api/repairs/{request_id}/approve`。在 `GET /api/repairs` 回读请求，确认审批人、`executed` 状态、各 DN 前后 OID 一致，以及每个目标 DN 的 `last_analyze` 均推进。保留审计 ID 和请求 ID 作为验收记录。
 
-最近一次模型端点探测返回 HTTP 403 `INSUFFICIENT_BALANCE`。上述联合验收仍待执行，下面的模拟模型用例独立记录。
+2026-11-25，网关恢复后在真实 `lab` 集群完成联合验收。第一次运行完成了知识检索，但模型在生成最终报告时超时。第二次仅对验收进程设置 `DEEPSEEK_TIMEOUT_SECONDS=150`，真实模型成功生成结构化诊断并通过检索工具取得 5 条固定版本官方引用。通过 API 路由函数提交测试审批，由独立普通账号执行 `ANALYZE`。持久化结果为 `executed`，审批身份为测试配置中的 `local-operator`，两个 DN 的表 OID 均保持一致，`last_analyze` 均从空值更新。测试表和账号已清理，保留审计 `fbd32849-4d8b-4bb4-935e-e0b7189a01e4` 和修复请求 `6967d05a-deb0-4b86-b9be-35d13cd46d2f`。本次使用现有非流式接口。
 
 ### 批量统计超时后的修复验收
 
