@@ -4,9 +4,47 @@ from unittest.mock import MagicMock, call, patch
 
 from backend.collectors.readonly_health import CHECKS, ReadonlyHealthCollector
 from backend.ai.agent_client import AIOpsAgent
+from backend.utils.distributed_collector import DistributedCollector
 
 
 class NodeConnectivityTests(unittest.TestCase):
+    def test_distributed_check_whitelist_matches_registered_queries(self):
+        self.assertLessEqual(DistributedCollector.ALLOWED_CHECKS, set(CHECKS))
+        self.assertIn("key_guc", CHECKS)
+        self.assertIn("storage", CHECKS)
+
+    def test_distributed_collect_rejects_arbitrary_sql(self):
+        collector = DistributedCollector(SimpleNamespace())
+        with self.assertRaisesRegex(ValueError, "Unsupported diagnostic checks"):
+            collector.collect_diagnostics(check_names=["SELECT 1"])
+
+    def test_distributed_collect_returns_structured_error_when_node_discovery_fails(self):
+        collector = DistributedCollector(SimpleNamespace())
+        with patch.object(collector, "get_cluster_nodes", return_value=[]):
+            result = collector.collect_diagnostics(check_names=["key_guc"])
+        self.assertEqual(result["summary"], {"total_nodes": 0, "success": 0, "failed": 1})
+        self.assertEqual(result["errors"][0]["status"], "error")
+
+    def test_distributed_collect_preserves_partial_node_failures(self):
+        collector = DistributedCollector(SimpleNamespace())
+        nodes = [
+            {"node_name": "cn0001", "node_type": "C"},
+            {"node_name": "dn0001", "node_type": "D"},
+        ]
+        node_results = {
+            "cn0001": {"node_name": "cn0001", "node_type": "C", "status": "partial",
+                       "checks": {"key_guc": []}, "errors": {"storage": {"message": "unsupported"}}},
+            "dn0001": {"node_name": "dn0001", "node_type": "D", "status": "error",
+                       "checks": {}, "errors": {"connection": "refused"}},
+        }
+        with patch.object(collector, "get_cluster_nodes", return_value=nodes), patch.object(
+            collector, "_collect_node_checks", side_effect=lambda node, checks: node_results[node["node_name"]]
+        ):
+            result = collector.collect_diagnostics(check_names=["key_guc", "storage"])
+        self.assertEqual(result["summary"], {"total_nodes": 2, "success": 1, "failed": 1})
+        self.assertEqual(result["results"][0]["status"], "partial")
+        self.assertEqual(result["errors"][0]["node_name"], "dn0001")
+
     def test_official_pg_unlock_probe_is_read_only(self):
         self.assertIn("pg_unlock_check_dependency", CHECKS["pg_unlock_diagnostics"])
         self.assertIn("pg_unlock_check_deadlock", CHECKS["pg_unlock_diagnostics"])

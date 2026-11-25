@@ -109,11 +109,12 @@ class ReadonlyAuditEngine:
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info', 'database_identity',
                     'prepared_transactions', 'data_node_prepared_transactions', 'pg_clean_diagnostics',
-                    'pg_unlock_diagnostics',
+                    'pg_unlock_diagnostics', 'key_guc',
                     'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
-                    'table_stats', 'index_usage', 'data_node_table_stats', 'data_node_stats_fallback')}
+                    'table_stats', 'index_usage', 'storage', 'data_node_table_stats',
+                    'data_node_stats_fallback')}
         findings = []
         lock_rows = checks.get('locks')
         blocked_locks = [row for row in lock_rows or [] if not row['granted']]
@@ -313,11 +314,12 @@ class ReadonlyAuditEngine:
         cluster_checks = {
             'nodes', 'connections', 'max_connections', 'replication',
             'database_info', 'database_identity', 'prepared_transactions', 'pg_clean_diagnostics',
-            'pg_unlock_diagnostics',
+            'pg_unlock_diagnostics', 'key_guc',
         }
         performance_checks = {
             'locks', 'long_running_queries', 'idle_transactions',
             'table_stats', 'index_usage',
+            'storage',
         }
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
         cluster_node_errors = {

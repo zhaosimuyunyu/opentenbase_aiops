@@ -2,7 +2,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.engines.repair_workflow import RepairWorkflow
-from backend.security.permissions import ApprovalWorkflow
+from backend.security.permissions import ApprovalWorkflow, OperationRegistry
+from backend.engines.repair_workflow import _proposal_fingerprint
 from backend.capabilities import CAPABILITIES
 
 
@@ -54,9 +55,7 @@ class RepairClaimTests(unittest.TestCase):
         workflow.config = MagicMock(
             AIOPS_REPAIR_DB_USER="", DB_USER="auditor",
         )
-        with patch.object(workflow, "_review_proposal") as review, patch(
-            "backend.engines.repair_workflow.OperationsStore"
-        ) as store:
+        with patch("backend.engines.repair_workflow.OperationsStore") as store:
             with self.assertRaisesRegex(ValueError, "AIOPS_REPAIR_DB_USER"):
                 workflow.create_request(
                     "analyze_table", {"table": "public.orders"}, {}, "test",
@@ -69,7 +68,6 @@ class RepairClaimTests(unittest.TestCase):
                         },
                     },
                 )
-            review.assert_not_called()
             store.assert_not_called()
 
     def test_proposal_preflight_checks_database_identity_and_target_before_model(self):
@@ -87,28 +85,22 @@ class RepairClaimTests(unittest.TestCase):
                 "nodes": [{"node_name": "dn1", "relation_oid": 123}],
             },
         }
-        with patch.object(workflow, "_preflight_analyze_target", side_effect=ValueError("preflight failed")) as preflight, patch.object(
-            workflow, "_review_proposal"
-        ) as review, patch("backend.engines.repair_workflow.OperationsStore") as store:
+        with patch.object(workflow, "_preflight_analyze_target", side_effect=ValueError("preflight failed")) as preflight, patch("backend.engines.repair_workflow.OperationsStore") as store:
             with self.assertRaisesRegex(ValueError, "preflight failed"):
                 workflow.create_request(
                     "analyze_table", {"table": "public.orders"}, {}, "test", "audit-1", finding
                 )
         preflight.assert_called_once_with("public.orders", finding["evidence"])
-        review.assert_not_called()
         store.assert_not_called()
 
     def test_destructive_proposals_are_blocked_before_model_or_database(self):
         workflow = RepairWorkflow()
         module = "backend.engines.repair_workflow"
-        with patch.object(workflow, "_review_proposal") as review, patch(
-            f"{module}.OperationsStore"
-        ) as store:
+        with patch(f"{module}.OperationsStore") as store:
             for operation in ("drop_database", "drop_table", "execute_sql"):
                 with self.subTest(operation=operation):
                     with self.assertRaisesRegex(ValueError, "Operation is not enabled"):
                         workflow.create_request(operation, {"table": "public.orders"}, {}, "test")
-            review.assert_not_called()
             store.assert_not_called()
 
     def test_resubmitting_reviewed_proposal_skips_model(self):
@@ -124,18 +116,16 @@ class RepairClaimTests(unittest.TestCase):
                 "nodes": [{"node_name": "dn1", "relation_oid": 123}],
             },
         }
-        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}, "agent_review": {"approved": True}, "human_approval": {"approved": True}}
+        fingerprint = _proposal_fingerprint("analyze_table", parameters, "audit-1", finding)
+        reviews = {"risk_policy": {"proposal_fingerprint": fingerprint}, "human_approval": {"approved": True}}
         cursor.fetchone.return_value = ("request-1", "pending", parameters, finding, reviews)
         with patch.object(workflow, "_preflight_analyze_target"), patch.object(
-            workflow, "_ensure_schema"), patch.object(
-            workflow, "_review_proposal"
-        ) as review, patch("backend.engines.repair_workflow.OperationsStore", return_value=store):
+            workflow, "_ensure_schema"), patch("backend.engines.repair_workflow.OperationsStore", return_value=store):
             result = workflow.create_request("analyze_table", parameters, {}, "retry", "audit-1", finding)
-        review.assert_not_called()
         self.assertEqual(result["request_id"], "request-1")
         self.assertTrue(result["reused"])
 
-    def test_approval_cannot_bypass_model_review(self):
+    def test_approval_rejects_stale_risk_policy(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(
             AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="test-token",
@@ -145,13 +135,13 @@ class RepairClaimTests(unittest.TestCase):
         cursor = store.conn.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = (
             "analyze_table", {"table": "public.orders"}, "pending", "audit-1", {},
-            {"program_review": {"approved": True}},
+            {"risk_policy": {"proposal_fingerprint": "stale"}},
         )
         module = "backend.engines.repair_workflow"
         with patch.object(workflow, "_ensure_schema"), patch(
             f"{module}.OperationsStore", return_value=store
         ), patch(f"{module}.OpenTenBaseConnector") as connector:
-            with self.assertRaisesRegex(ValueError, "program, model, and agent review"):
+            with self.assertRaisesRegex(ValueError, "Risk policy"):
                 workflow.approve_and_execute("request-1", "operator", "test-token")
             connector.assert_not_called()
             store.conn.commit.assert_not_called()
@@ -166,13 +156,12 @@ class RepairClaimTests(unittest.TestCase):
         cursor = store.conn.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = (
             "analyze_table", {"table": "public.orders"}, "pending", "audit-1", {},
-            {"program_review": {"approved": True}, "model_review": {"approved": True},
-             "agent_review": {"approved": True}},
+            {"risk_policy": {"proposal_fingerprint": "stale"}},
         )
         with patch.object(workflow, "_ensure_schema"), patch(
             "backend.engines.repair_workflow.OperationsStore", return_value=store
         ), patch("backend.engines.repair_workflow.OpenTenBaseConnector") as connector:
-            with self.assertRaisesRegex(ValueError, "Human approval"):
+            with self.assertRaisesRegex(ValueError, "Risk policy"):
                 workflow.approve_and_execute("request-1", "operator", "test-token")
             connector.assert_not_called()
 
@@ -235,26 +224,16 @@ class RepairClaimTests(unittest.TestCase):
         self.assertIn("interval '5 minutes'", statement)
         store.close.assert_called_once()
 
-    def test_independent_safety_agent_can_use_separate_model(self):
-        workflow = RepairWorkflow()
-        workflow.config = MagicMock(
-            AIOPS_SAFETY_REVIEW_MODEL="safety-model",
-            DEEPSEEK_MODEL="diagnosis-model",
-        )
-        response = MagicMock()
-        response.choices = [MagicMock(message=MagicMock(
-            content='{"approved":true,"reason":"Evidence supports the operation."}'
-        ))]
-        client = MagicMock()
-        client.chat.completions.create.return_value = response
-        client_context = MagicMock()
-        client_context.__enter__.return_value = client
-        with patch("backend.engines.repair_workflow.OpenAI", return_value=client_context):
-            review = workflow._review_proposal(
-                "analyze_table", "public.orders", {}, {"review_role": "independent_safety_agent"}
-            )
-        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "safety-model")
-        self.assertEqual(review["reviewer"], "independent_safety_agent")
+    def test_risk_classifier_requires_human_for_writes_and_unknown_actions(self):
+        self.assertFalse(OperationRegistry.classify("get_database_locks")["requires_human_approval"])
+        self.assertTrue(OperationRegistry.classify("analyze_table")["requires_human_approval"])
+        self.assertTrue(OperationRegistry.classify("unknown_action")["requires_human_approval"])
+        drop_database = OperationRegistry.classify("drop_database")
+        self.assertEqual(drop_database["risk_level"], "high")
+        self.assertEqual(drop_database["matched_keyword"].lower(), "drop")
+        policy = OperationRegistry.classify("query_cluster_status", "DROP TABLE public.orders")
+        self.assertEqual(policy["risk_level"], "high")
+        self.assertEqual(policy["matched_keyword"].lower(), "drop")
 
     def test_reject_denies_invalid_token_before_accessing_storage(self):
         workflow = RepairWorkflow()
@@ -276,7 +255,8 @@ class RepairClaimTests(unittest.TestCase):
             "check": "stale_table_statistics",
             "evidence": {"schema": "public", "table": "orders"},
         }
-        reviews = {"program_review": {"approved": True}, "model_review": {"approved": True}, "agent_review": {"approved": True}, "human_approval": {"approved": True}}
+        fingerprint = _proposal_fingerprint("analyze_table", parameters, "audit-1", finding)
+        reviews = {"risk_policy": {"proposal_fingerprint": fingerprint}, "human_approval": {"approved": True}}
         cursor.fetchone.side_effect = [
             ("analyze_table", parameters, "pending", "audit-1", finding, reviews),
             ("analyze_table", parameters, "executing", "audit-1", finding, reviews),

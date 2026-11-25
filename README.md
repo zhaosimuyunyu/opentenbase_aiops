@@ -12,6 +12,9 @@
 - 🔁 **周期健康巡检** - 可选定时采集、AI 分析并将审计结果持久化
 - 📊 **健康监控** - 实时集群状态监控和健康巡检
 - 🔍 **性能诊断** - 锁分析、慢查询检测、表统计
+- 🧪 **SQL 风险审核** - 危险语句规则检查与只读 EXPLAIN
+- 🌐 **CN/DN 分布式采集** - 节点发现、只读巡检和逐节点失败隔离
+- 🧾 **风险审批策略** - 白名单只读工具自动运行，写操作与未知操作要求人工批准
 - 🎯 **分布式特性** - 针对 OpenTenBase 分布式架构的专项诊断
 - 📈 **可视化报告** - 清晰的 Web 界面和数据展示
 
@@ -131,7 +134,9 @@ opentenbase-aiops/
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
 
-修复请求的执行顺序是程序校验、模型复核、独立安全审查 Agent、人工批准和执行。人工批准通过 `/api/repairs/{request_id}/human-approval` 单独记录，随后才允许调用批准执行接口。删除库、删表和任意 SQL 不在执行白名单内。
+风险策略由程序根据操作白名单和危险关键词确定，模型不能自行降低风险等级。白名单只读工具可由 Agent 自动调用。当前唯一开放的写操作是 `ANALYZE`，属于需要人工批准的中风险操作。危险或未知操作要求人工审批，且没有对应执行器时仍会拒绝执行。人工批准通过 `/api/repairs/{request_id}/human-approval` 单独记录，随后调用批准执行接口。删除库、删表和任意 SQL 不在执行白名单内。
+
+`POST /api/sql-audit` 接收单条 SQL，返回规则命中和风险等级。对未命中高风险规则的 `SELECT`、`WITH`、`VALUES` 语句，可运行带超时限制的只读 `EXPLAIN (FORMAT JSON)`。多条 SQL 会被拒绝。`GET /api/distributed/nodes` 和 `POST /api/distributed/collect` 从 `pgxc_node` 发现 CN/DN，并运行内置只读检查，逐节点报告连接或查询失败。集群注册地址必须能从 API 容器访问。
 
 `AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。
 | `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的普通执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |

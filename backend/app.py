@@ -12,6 +12,7 @@ from typing import Literal, Optional
 from .utils.config import Config
 from .utils.db_connector import OpenTenBaseConnector
 from .utils.logger import setup_logger
+from .utils.distributed_collector import DistributedCollector
 from .collectors.cluster import ClusterCollector
 from .collectors.performance import PerformanceCollector
 from .ai.llm_client import DeepSeekClient
@@ -20,10 +21,12 @@ from .utils.operations_store import OperationsStore
 from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
+from .engines.sql_audit import audit_sql
 from .capabilities import CAPABILITIES
 
 logger = setup_logger(__name__)
 config = Config()
+distributed_collector = DistributedCollector(config)
 health_audit_scheduler = HealthAuditScheduler(config)
 
 
@@ -73,6 +76,11 @@ class DiagnosisRequest(BaseModel):
     description: str
 
 
+class SqlAuditRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=20000)
+    explain: bool = True
+
+
 class RepairApprovalRequest(BaseModel):
     approver: str
     token: str
@@ -120,10 +128,16 @@ async def capabilities():
 
 
 @app.get("/api/cluster/status")
-async def get_cluster_status():
-    """Get cluster status"""
+async def get_cluster_status(all_nodes: bool = Query(False, description="Collect from all nodes in cluster")):
+    """Get cluster status with optional distributed collection"""
     try:
         result = cluster_collector.collect()
+
+        if all_nodes and config.AIOPS_DISTRIBUTED_ENABLED:
+            result['data']['distributed_collection'] = distributed_collector.collect_diagnostics(
+                check_names=["database_info", "connections", "replication"]
+            )
+
         return result
     except Exception as e:
         logger.error(f"Failed to get cluster status: {e}")
@@ -191,6 +205,18 @@ async def diagnose_issue(request: DiagnosisRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/sql-audit")
+def run_sql_audit(request: SqlAuditRequest):
+    """Classify SQL risk and optionally run a read-only EXPLAIN."""
+    try:
+        return audit_sql(request.sql, explain=request.explain, config=config)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("SQL audit failed")
+        raise HTTPException(status_code=503, detail="SQL audit is unavailable") from error
+
+
 @app.get("/api/health-report")
 async def get_health_report():
     """Generate AI-powered health report"""
@@ -210,6 +236,42 @@ async def get_health_report():
         }
     except Exception as e:
         logger.error(f"Failed to generate health report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/distributed/nodes")
+async def get_distributed_nodes():
+    """Collect fixed read-only diagnostics from registered CN/DN nodes."""
+    try:
+        if not config.AIOPS_DISTRIBUTED_ENABLED:
+            raise HTTPException(status_code=403, detail="Distributed collection is disabled")
+        return distributed_collector.collect_diagnostics()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get cluster nodes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/distributed/collect")
+async def distributed_collect(
+    node_filter: Optional[Literal["C", "D"]] = Query(None),
+    check: Optional[list[Literal[
+        "database_info", "connections", "max_connections", "replication",
+        "prepared_transactions", "locks", "long_running_queries", "idle_transactions",
+        "table_stats", "index_usage", "key_guc", "storage",
+    ]]] = Query(None),
+):
+    """Run selected built-in read-only checks on CN/DN nodes."""
+    try:
+        if not config.AIOPS_DISTRIBUTED_ENABLED:
+            raise HTTPException(status_code=403, detail="Distributed collection is disabled")
+
+        return distributed_collector.collect_diagnostics(node_filter, check)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Distributed collection failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

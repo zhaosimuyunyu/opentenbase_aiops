@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -6,6 +7,44 @@ from backend.ai.agent_client import AIOpsAgent
 
 
 class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_results_with_datetime_are_serialized_for_followup_turn(self):
+        agent = AIOpsAgent(SimpleNamespace(
+            DEEPSEEK_API_KEY="fixture-key",
+            DEEPSEEK_API_BASE="https://example.invalid/v1",
+            DEEPSEEK_TIMEOUT_SECONDS=1,
+            DEEPSEEK_MODEL="fixture-model",
+        ))
+        self.addCleanup(agent.client.close)
+        tool_call = SimpleNamespace(
+            id="locks-1",
+            function=SimpleNamespace(
+                name="get_database_locks", arguments='{"include_granted":true}'
+            ),
+        )
+        first = SimpleNamespace(content=None, tool_calls=[tool_call])
+        final = SimpleNamespace(
+            content='{"root_cause":"No blocking locks","risk_level":"low",'
+                    '"evidence":[],"recommendations":[]}',
+            tool_calls=[],
+        )
+        lock_result = {
+            "collection_status": "success",
+            "locks": [{"xact_start": datetime(2026, 11, 25, tzinfo=timezone.utc)}],
+        }
+        with patch.object(agent.client.chat.completions, "create", Mock(side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=first)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=final)]),
+        ])) as completion, patch(
+            "backend.ai.agent_client.execute_get_database_locks",
+            new=AsyncMock(return_value=lock_result),
+        ):
+            report = await agent.diagnose("Review locks", {})
+
+        tool_message = completion.call_args_list[1].kwargs["messages"][-1]
+        self.assertIn("2026-11-25 00:00:00+00:00", tool_message["content"])
+        self.assertFalse(report["analysis_fallback"])
+        self.assertTrue(report["tool_called"])
+
     async def test_model_can_search_again_after_reading_tool_results(self):
         agent = AIOpsAgent(SimpleNamespace(
             DEEPSEEK_API_KEY="fixture-key",

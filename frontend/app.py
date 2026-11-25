@@ -77,7 +77,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "导航",
-        ["📊 健康监控", "🛡️ 只读巡检", "📜 巡检历史", "🧾 修复审批", "💬 智能问答", "🔍 性能诊断"],
+        ["📊 健康监控", "🛡️ 只读巡检", "📜 巡检历史", "🧾 修复审批", "💬 智能问答", "🔍 性能诊断", "🧪 SQL 审核"],
         label_visibility="collapsed"
     )
 
@@ -498,25 +498,19 @@ elif page == "🧾 修复审批":
         for item in items:
             with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
                 proposal_evidence = item.get("evidence") or {}
-                model_review = proposal_evidence.get("model_review") or {}
-                agent_review = proposal_evidence.get("agent_review") or {}
+                risk_policy = proposal_evidence.get("risk_policy") or {}
                 human_approval = proposal_evidence.get("human_approval") or {}
-                program_review = proposal_evidence.get("program_review") or {}
-                reviews_ready = all((review.get("approved") is True) for review in
-                                    (program_review, model_review, agent_review))
-                ready = reviews_ready and human_approval.get("approved") is True
-                if ready:
-                    st.caption("程序校验、模型复核、独立 Agent 复核和人工审批均已通过")
-                    if model_review.get("reason"):
-                        st.text(model_review["reason"])
-                    if agent_review.get("reason"):
-                        st.text(agent_review["reason"])
-                elif reviews_ready:
-                    st.success("程序校验、模型复核和独立 Agent 复核通过，等待人工批准")
-                    if model_review.get("reason"):
-                        st.caption(f"模型复核：{model_review['reason']}")
-                    if agent_review.get("reason"):
-                        st.caption(f"Agent 复核：{agent_review['reason']}")
+                requires_human = risk_policy.get("requires_human_approval", True)
+                if risk_policy:
+                    risk_name = {"low": "低风险", "moderate": "中风险", "high": "高风险", "unknown": "未知风险"}.get(
+                        risk_policy.get("risk_level"), "未知风险"
+                    )
+                    st.caption(f"风险等级：{risk_name} · {risk_policy.get('reason', '')}")
+                ready = not requires_human or human_approval.get("approved") is True
+                if requires_human and not ready:
+                    st.warning("此操作需要人工批准后执行")
+                elif ready:
+                    st.success("风险策略满足，可执行")
                 if proposal_evidence.get("proposal_source") == "stale_table_statistics":
                     st.caption("提案来源 · 表统计过时巡检规则")
                 stale_nodes = (proposal_evidence.get("observation") or {}).get("stale_nodes") or []
@@ -583,7 +577,7 @@ elif page == "🧾 修复审批":
                     token = st.text_input("审批令牌", type="password", key=f"t-{item['request_id']}")
                     left, right = st.columns(2)
                     if left.button("人工批准", key=f"human-approve-{item['request_id']}",
-                                   disabled=not reviews_ready or human_approval.get("approved") is True):
+                                   disabled=not requires_human or human_approval.get("approved") is True):
                         response = requests.post(
                             f"{api_base}/api/repairs/{item['request_id']}/human-approval",
                             json={"token": token}, timeout=10,
@@ -687,6 +681,33 @@ elif page == "💬 智能问答":
         if st.button("清空对话", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
+
+elif page == "🧪 SQL 审核":
+    st.markdown('<div class="main-header">🧪 SQL 风险审核</div>', unsafe_allow_html=True)
+    st.caption("审核仅识别风险并运行只读 EXPLAIN，不会执行提交、修改或删除操作。")
+    sql_text = st.text_area("SQL", height=180, placeholder="SELECT ...")
+    explain = st.checkbox("运行只读 EXPLAIN", value=True)
+    if st.button("开始审核", type="primary", disabled=not sql_text.strip()):
+        api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
+        try:
+            response = requests.post(f"{api_base}/api/sql-audit", json={"sql": sql_text, "explain": explain}, timeout=15)
+            response.raise_for_status()
+            report = response.json()
+            level = report.get("risk_level", "unknown")
+            if level in {"critical", "high"}:
+                st.error(f"风险等级：{level}")
+            elif level == "medium":
+                st.warning("风险等级：medium")
+            else:
+                st.success("风险等级：low")
+            if report.get("findings"):
+                st.dataframe(report["findings"], use_container_width=True, hide_index=True)
+            if report.get("explain_error"):
+                st.warning(report["explain_error"].get("message", "EXPLAIN 失败"))
+            elif report.get("explain") is not None:
+                st.json(report["explain"])
+        except Exception as error:
+            st.error(f"SQL 审核失败：{error}")
 
 elif page == "🔍 性能诊断":
     st.markdown('<div class="main-header">🔍 性能诊断</div>', unsafe_allow_html=True)

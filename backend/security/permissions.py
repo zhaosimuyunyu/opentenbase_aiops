@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import uuid
+import re
 from ..utils.logger import setup_logger
 from ..utils.db_connector import OpenTenBaseConnector
 
@@ -24,6 +25,16 @@ class OperationRegistry:
     """
 
     OPERATIONS = {
+        "search_knowledge": {
+            "level": PermissionLevel.READ_ONLY,
+            "description": "Search the versioned operations knowledge base",
+            "sql_pattern": "VECTOR SEARCH",
+        },
+        "get_database_locks": {
+            "level": PermissionLevel.READ_ONLY,
+            "description": "Read current lock and blocker evidence",
+            "sql_pattern": "SELECT FROM pg_locks",
+        },
         # === READ_ONLY operations (AI can execute automatically) ===
         "query_cluster_status": {
             "level": PermissionLevel.READ_ONLY,
@@ -104,6 +115,55 @@ class OperationRegistry:
         },
     }
 
+    RISK_KEYWORDS = re.compile(
+        r"\b(drop|truncate|delete|update|insert|merge|alter|grant|revoke|create\s+role|"
+        r"create\s+user|vacuum\s+full|reindex|pg_terminate_backend|pg_cancel_backend|"
+        r"pg_clean_(execute|commit|rollback)|restart|shutdown|failover|switchover)\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def classify(cls, operation_name: str, statement: str = "") -> Dict[str, Any]:
+        """Return a deterministic execution policy. Unknown actions require a person."""
+        operation = cls.get_operation(operation_name)
+        matched = cls.RISK_KEYWORDS.search(statement or "")
+        operation_keyword = cls.RISK_KEYWORDS.search((operation_name or "").replace("_", " "))
+        matched = matched or operation_keyword
+        if matched:
+            return {
+                "risk_level": "high",
+                "requires_human_approval": True,
+                "matched_keyword": matched.group(0),
+                "reason": "Operation may change data, access, availability, or cluster state",
+            }
+        if operation is None:
+            return {
+                "risk_level": "unknown",
+                "requires_human_approval": True,
+                "matched_keyword": None,
+                "reason": "Operation is not in the explicit registry",
+            }
+        if operation["level"] == PermissionLevel.DANGEROUS:
+            return {
+                "risk_level": "high",
+                "requires_human_approval": True,
+                "matched_keyword": matched.group(0) if matched else operation_name,
+                "reason": "Operation may change data, access, availability, or cluster state",
+            }
+        if operation["level"] == PermissionLevel.READ_ONLY:
+            return {
+                "risk_level": "low",
+                "requires_human_approval": False,
+                "matched_keyword": None,
+                "reason": "Registered read-only operation",
+            }
+        return {
+            "risk_level": "moderate",
+            "requires_human_approval": True,
+            "matched_keyword": None,
+            "reason": "Registered operation can affect database workload",
+        }
+
     @classmethod
     def get_operation(cls, operation_name: str) -> Optional[Dict]:
         """Get operation definition"""
@@ -112,11 +172,7 @@ class OperationRegistry:
     @classmethod
     def require_approval(cls, operation_name: str) -> bool:
         """Check if operation requires human approval"""
-        op = cls.OPERATIONS.get(operation_name)
-        if not op:
-            return True  # Unknown operations always require approval
-
-        return op['level'] in [PermissionLevel.SAFE_WRITE, PermissionLevel.DANGEROUS]
+        return cls.classify(operation_name)["requires_human_approval"]
 
     @classmethod
     def is_dangerous(cls, operation_name: str) -> bool:

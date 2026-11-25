@@ -126,6 +126,33 @@ CHECKS = {
         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
         ORDER BY idx_scan DESC LIMIT 50
     """,
+    "key_guc": """
+        SELECT name, setting, unit, source, short_desc
+        FROM pg_catalog.pg_settings
+        WHERE name IN (
+            'max_connections', 'shared_buffers', 'work_mem',
+            'maintenance_work_mem', 'statement_timeout', 'lock_timeout',
+            'idle_in_transaction_session_timeout', 'max_prepared_transactions',
+            'wal_level', 'synchronous_commit'
+        )
+        ORDER BY name
+    """,
+    "storage": """
+        SELECT n.nspname AS schema_name,
+               c.relname AS relation_name,
+               c.relkind,
+               pg_catalog.pg_total_relation_size(c.oid) AS total_bytes,
+               pg_catalog.pg_relation_size(c.oid) AS table_bytes,
+               COALESCE(s.n_live_tup, 0) AS live_tuples,
+               COALESCE(s.n_dead_tup, 0) AS dead_tuples
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        LEFT JOIN pg_catalog.pg_stat_user_tables s ON s.relid = c.oid
+        WHERE c.relkind IN ('r', 'm')
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY pg_catalog.pg_total_relation_size(c.oid) DESC
+        LIMIT 50
+    """,
 }
 
 

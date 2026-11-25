@@ -6,6 +6,18 @@
 
 ## 2026-11-24 运行状态
 
+## 2026-11-25 交付检查
+
+- 已实现 SQL 静态风险规则与只读 `EXPLAIN (FORMAT JSON)` API，并通过 Docker HTTP 验证危险 SQL 分类。
+- Agent 已注册知识检索与锁检查只读工具。多轮工具调用中的 datetime JSON 序列化已修复并有回归测试。
+- 分布式采集使用固定只读检查白名单，覆盖 CN/DN 数据库信息、连接、锁、GUC、复制等检查，节点失败独立返回。
+- Docker 实机验证覆盖 1 个 CN 和 2 个 DN，三个端点的 `database_info`、`connections` 和 `locks` 检查均返回成功。
+- SSE 健康审计已执行并持久化证据、AI 分析、知识引用和工具轨迹。一次完整巡检期间模型请求超时，记录正确标记了确定性 fallback。
+- SQL 审核 HTTP 验收通过。Python 编译、`git diff --check` 通过，47 个 unittest 通过。
+- 实验集群发现一笔跨节点 prepared transaction 阻塞等待者。审计已关联 CN 事务 ID、两个 DN 的参与事务 ID 和知识来源。该事务保持未决，系统没有自动提交或回滚。
+- 由于该未决事务阻塞系统目录访问，`table_stats`、`index_usage` 和 `storage` 检查发生 lock timeout，并以部分结果和明确错误持久化。
+- 修复执行仍只开放有人工审批的 `ANALYZE`。尚未在真实数据库完成执行验收，其他写操作没有执行器。
+
 - API 容器通过 psycopg2 可连接 OpenTenBase v5.0 的 CN。
 - 健康审计已持久化现场证据、AI 分析和知识引用。
 - 巡检能够识别锁等待、预备事务阻塞和不可达节点。
@@ -340,6 +352,6 @@ approval.approve(request_id, reviewer)
 
 ---
 
-**更新时间**: 2026-11-22
+**更新时间**: 2026-11-25
 **负责人**: AI Development Team
 **状态**: 核心架构完成，进入功能完善阶段
