@@ -30,6 +30,7 @@ class RepairClaimTests(unittest.TestCase):
         self.assertEqual(repairs["verified_executors"], ["analyze_table"])
         self.assertFalse(repairs["automatic_prepared_transaction_resolution"])
         self.assertIn("kill_connection", repairs["suggestion_only"])
+        self.assertIn("cancel_query", repairs["suggestion_only"])
 
     def test_legacy_executor_never_reports_mock_success(self):
         workflow = ApprovalWorkflow.__new__(ApprovalWorkflow)

@@ -38,7 +38,7 @@ CAPABILITIES = {
             "requires_admin_function_allowlist": True,
         },
         "suggestion_only": [
-            "create_index", "vacuum_table", "reindex", "kill_query",
+            "create_index", "vacuum_table", "reindex", "cancel_query", "kill_query",
             "kill_connection", "alter_config",
         ],
         "automatic_prepared_transaction_resolution": False,
