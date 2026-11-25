@@ -82,6 +82,19 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             scheduler._run_lock.release()
 
+    def test_persists_automatic_repair_outcome_with_the_audit(self):
+        store = MagicMock()
+        outcome = {"status": "skipped", "reason": "health_collection_incomplete"}
+        with patch(
+            "backend.engines.health_audit_scheduler.OperationsStore", return_value=store
+        ):
+            HealthAuditScheduler._persist_auto_repair_result("audit-1", outcome)
+        statement, parameters = store.conn.cursor.return_value.__enter__.return_value.execute.call_args.args
+        self.assertIn("'{automatic_repair}'", statement)
+        self.assertEqual(parameters[0].adapted, outcome)
+        self.assertEqual(parameters[1], "audit-1")
+        store.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

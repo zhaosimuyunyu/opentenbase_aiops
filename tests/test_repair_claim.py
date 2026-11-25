@@ -198,6 +198,38 @@ class RepairClaimTests(unittest.TestCase):
                     workflow.approve_and_execute("request-1", "operator", "test-token")
             store.assert_not_called()
 
+    def test_automatic_execution_rejects_missing_policy_approval(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_AUTO_REPAIR_ENABLED=True,
+            AIOPS_APPROVER_TOKENS="", AIOPS_APPROVAL_TOKEN="",
+            DB_USER="auditor", AIOPS_REPAIR_DB_USER="repair_operator",
+        )
+        parameters = {"table": "public.orders"}
+        finding = {"check": "stale_table_statistics", "evidence": {}}
+        fingerprint = _proposal_fingerprint("analyze_table", parameters, "audit-1", finding)
+        store = MagicMock()
+        store.conn.cursor.return_value.__enter__.return_value.fetchone.return_value = (
+            "analyze_table", parameters, "pending", "audit-1", finding,
+            {"risk_policy": {"proposal_fingerprint": fingerprint}},
+        )
+        with patch.object(workflow, "_ensure_schema"), patch(
+            "backend.engines.repair_workflow.OperationsStore", return_value=store
+        ), patch("backend.engines.repair_workflow.OpenTenBaseConnector") as connector:
+            with self.assertRaisesRegex(ValueError, "Human approval"):
+                workflow.approve_and_execute(
+                    "request-1", "aiops-auto-policy", automatic=True
+                )
+            connector.assert_not_called()
+
+    def test_automatic_repair_is_off_by_default_and_does_not_read_storage(self):
+        workflow = RepairWorkflow()
+        workflow.config.AIOPS_AUTO_REPAIR_ENABLED = False
+        with patch("backend.engines.repair_workflow.OperationsStore") as store:
+            result = workflow.auto_repair_from_audit("audit-1")
+        self.assertEqual(result, {"status": "skipped", "reason": "automatic_repair_disabled"})
+        store.assert_not_called()
+
     def test_individual_tokens_bind_identity_and_disable_shared_token(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(

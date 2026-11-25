@@ -399,7 +399,8 @@ class RepairWorkflow:
                         "target": table}
             request = self.create_request(
                 "analyze_table", {"table": table},
-                {"proposal_source": "scheduled_auto_repair", "observation": observed,
+                {"proposal_source": "scheduled_auto_repair", "trigger": "scheduled",
+                 "observation": observed,
                  "ai_analysis": record[1], "knowledge_refs": record[2] or []},
                 "Scheduled automatic repair for a complete stale-statistics audit",
                 audit_id, finding,
@@ -472,6 +473,9 @@ class RepairWorkflow:
                 auto_approved = bool(
                     automatic
                     and automatic_policy.get("approved") is True
+                    and automatic_policy.get("actor") == "aiops-auto-policy"
+                    and automatic_policy.get("policy") ==
+                    "scheduled_single_finding_complete_collection_allowlisted_analyze_v1"
                     and automatic_policy.get("proposal_fingerprint") == fingerprint
                     and operation == "analyze_table"
                 )
@@ -500,6 +504,13 @@ class RepairWorkflow:
                         raise ValueError("Repair target does not match the audited finding")
                 if automatic and not auto_approved:
                     raise ValueError("Automatic policy approval is missing or stale")
+                if automatic and (
+                    table not in self.config.AIOPS_AUTO_REPAIR_TARGETS
+                    or not self.config.AIOPS_REPAIR_FUNCTION_ENABLED
+                    or (reviews.get("proposal_source") != "scheduled_auto_repair")
+                    or reviews.get("trigger") != "scheduled"
+                ):
+                    raise ValueError("Automatic repair no longer meets its configured scope")
                 self._record_event(
                     cur, request_id, "execution_claimed", actor=approver,
                     status="executing", event_data={"operation": operation, "parameters": params},
