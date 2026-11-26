@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,12 +9,79 @@ from backend.engines.health_audit_scheduler import HealthAuditScheduler
 
 class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
     def make_scheduler(self):
-        return HealthAuditScheduler(SimpleNamespace(
+        scheduler = HealthAuditScheduler(SimpleNamespace(
             AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=120,
             AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS=3600,
             AIOPS_AUTO_AUDIT_TARGETS=(None,),
             AIOPS_AUTO_REPAIR_ENABLED=False,
         ))
+        scheduler._restore_runtime_status = AsyncMock()
+        scheduler._persist_runtime_status = AsyncMock()
+        return scheduler
+
+    def test_restores_persisted_scheduler_state(self):
+        store = MagicMock()
+        store.conn.cursor.return_value.__enter__.return_value.fetchone.return_value = ({
+            "state": "failed",
+            "last_error_type": "OperationalError",
+            "consecutive_failures": 2,
+            "failed_targets": ["full"],
+        },)
+        scheduler = self.make_scheduler()
+        with patch(
+            "backend.engines.health_audit_scheduler.OperationsStore", return_value=store
+        ):
+            scheduler._restore_runtime_status_sync()
+
+        status = scheduler.runtime_status()
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(status["last_error_type"], "OperationalError")
+        self.assertEqual(status["consecutive_failures"], 2)
+        self.assertEqual(status["failed_targets"], ["full"])
+        self.assertTrue(status["restored_from_store"])
+        store.close.assert_called_once()
+
+    def test_persists_scheduler_state_as_json(self):
+        scheduler = self.make_scheduler()
+        scheduler._set_runtime_status(
+            state="failed", last_error_type="OperationalError", consecutive_failures=1,
+        )
+        store = MagicMock()
+        with patch(
+            "backend.engines.health_audit_scheduler.OperationsStore", return_value=store
+        ):
+            scheduler._persist_runtime_status_sync()
+
+        statement, parameters = store.conn.cursor.return_value.__enter__.return_value.execute.call_args_list[-1].args
+        self.assertIn("ON CONFLICT(state_id) DO UPDATE", statement)
+        self.assertEqual(parameters[0].adapted["state"], "failed")
+        self.assertEqual(parameters[0].adapted["consecutive_failures"], 1)
+        store.close.assert_called_once()
+
+    async def test_restored_retry_deadline_is_honored_after_restart(self):
+        scheduler = self.make_scheduler()
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=45)
+
+        async def restore_state():
+            scheduler._set_runtime_status(
+                state="failed",
+                consecutive_failures=2,
+                next_retry_at=retry_at.isoformat(),
+                restored_from_store=True,
+            )
+
+        scheduler._restore_runtime_status = AsyncMock(side_effect=restore_state)
+        scheduler.run_once = AsyncMock(return_value={"audit_id": "unexpected"})
+
+        with patch("backend.engines.health_audit_scheduler.asyncio.sleep", new=AsyncMock(
+            side_effect=asyncio.CancelledError
+        )) as sleep:
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.run_forever()
+
+        scheduler.run_once.assert_not_awaited()
+        self.assertGreater(sleep.await_args.args[0], 40)
+        self.assertEqual(scheduler.runtime_status()["consecutive_failures"], 2)
 
     async def test_runtime_status_tracks_successful_scheduled_audit(self):
         scheduler = self.make_scheduler()
@@ -34,6 +101,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(datetime.fromisoformat(status["next_retry_at"]))
         self.assertEqual(status["consecutive_failures"], 0)
         scheduler.run_once.assert_awaited_once_with(scheduled=True, table=None)
+        scheduler._persist_runtime_status.assert_awaited_once()
 
     async def test_runtime_status_records_failure_and_retry_time(self):
         scheduler = self.make_scheduler()
@@ -58,6 +126,8 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
             AIOPS_AUTO_AUDIT_TARGETS=("public.failed", "public.healthy"),
             AIOPS_AUTO_REPAIR_ENABLED=False,
         ))
+        scheduler._restore_runtime_status = AsyncMock()
+        scheduler._persist_runtime_status = AsyncMock()
         scheduler.run_once = AsyncMock(side_effect=[
             RuntimeError("target unavailable"),
             {"audit_id": "audit-healthy"},
@@ -84,6 +154,8 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
             AIOPS_AUTO_AUDIT_TARGETS=(None,),
             AIOPS_AUTO_REPAIR_ENABLED=False,
         ))
+        scheduler._restore_runtime_status = AsyncMock()
+        scheduler._persist_runtime_status = AsyncMock()
         scheduler._runtime_status["consecutive_failures"] = 2
         scheduler.run_once = AsyncMock(side_effect=RuntimeError("database unavailable"))
 

@@ -160,6 +160,10 @@ API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度�
 
 计划巡检失败现在按连续失败次数指数退避，首轮 60 秒，随后逐步增加，最大值受 `AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS` 和巡检周期共同约束。跳过周期去重时保持 30 秒后重查，只有整轮所有目标成功才清零失败计数。环境默认上限为 3600 秒，生产使用的实际退避路径通过确定性单测覆盖。
 
+调度器最近完成/失败状态及退避 deadline 保存在 metadata PostgreSQL 的 `aiops_scheduler_runtime` 单行记录中，服务重启后会恢复失败计数并等待剩余退避时间。运行中状态保留在进程内，只有周期终态会写入，避免进程中断后留下永久 `running`。周期去重跳过不覆盖已持久化结果，从而避免多实例中的非执行者覆盖实际执行者状态。
+
+已在真实 metadata PostgreSQL 上验证写入并由新 scheduler 实例恢复 `failed`、错误类型、连续失败数和目标列表，随后恢复了原状态/清理测试记录；API 进程内 scheduler 状态保持不变。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。

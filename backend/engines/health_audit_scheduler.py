@@ -29,6 +29,7 @@ class HealthAuditScheduler:
             "completed_targets": [],
             "skipped_targets": [],
             "failed_targets": [],
+            "restored_from_store": False,
         }
 
     def runtime_status(self):
@@ -36,6 +37,57 @@ class HealthAuditScheduler:
 
     def _set_runtime_status(self, **updates):
         self._runtime_status.update(updates)
+
+    def _restore_runtime_status_sync(self):
+        store = OperationsStore()
+        try:
+            with store.conn, store.conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS aiops_scheduler_runtime (
+                        state_id text PRIMARY KEY,
+                        status jsonb NOT NULL,
+                        updated_at timestamptz NOT NULL DEFAULT now()
+                    )
+                """)
+                cursor.execute(
+                    "SELECT status FROM aiops_scheduler_runtime WHERE state_id='health_audit'"
+                )
+                row = cursor.fetchone()
+            if row and isinstance(row[0], dict):
+                restored = {**self._runtime_status, **row[0]}
+                restored["restored_from_store"] = True
+                self._runtime_status = restored
+        finally:
+            store.close()
+
+    def _persist_runtime_status_sync(self):
+        store = OperationsStore()
+        try:
+            with store.conn, store.conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS aiops_scheduler_runtime (
+                        state_id text PRIMARY KEY,
+                        status jsonb NOT NULL,
+                        updated_at timestamptz NOT NULL DEFAULT now()
+                    )
+                """)
+                cursor.execute("""
+                    INSERT INTO aiops_scheduler_runtime(state_id,status,updated_at)
+                    VALUES('health_audit',%s,now())
+                    ON CONFLICT(state_id) DO UPDATE
+                    SET status=EXCLUDED.status,updated_at=now()
+                """, (Json(self.runtime_status()),))
+        finally:
+            store.close()
+
+    async def _restore_runtime_status(self):
+        await run_in_threadpool(self._restore_runtime_status_sync)
+
+    async def _persist_runtime_status(self):
+        try:
+            await run_in_threadpool(self._persist_runtime_status_sync)
+        except Exception:
+            logger.exception("Could not persist health audit scheduler state")
 
     async def run_once(self, *, scheduled=False, table=None, progress=None,
                        trigger=None, trigger_context=None):
@@ -106,6 +158,20 @@ class HealthAuditScheduler:
             kb.close()
 
     async def run_forever(self):
+        try:
+            await self._restore_runtime_status()
+            retry_at = self._runtime_status.get("next_retry_at")
+            if retry_at:
+                delay = max(
+                    0,
+                    (datetime.fromisoformat(retry_at) - datetime.now(timezone.utc)).total_seconds(),
+                )
+                if delay:
+                    await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Could not restore health audit scheduler state")
         while True:
             delay = self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS
             completed_targets = []
@@ -195,6 +261,8 @@ class HealthAuditScheduler:
             self._set_runtime_status(
                 next_retry_at=(datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
             )
+            if self._runtime_status["state"] in {"completed", "failed"}:
+                await self._persist_runtime_status()
             await asyncio.sleep(delay)
 
     @staticmethod
