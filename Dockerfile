@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/_stcore/health || exit 1
 
 # Default command
-CMD ["streamlit", "run", "frontend/console.py", "--server.port=8080", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "frontend/app_redesigned.py", "--server.port=8080", "--server.address=0.0.0.0"]
