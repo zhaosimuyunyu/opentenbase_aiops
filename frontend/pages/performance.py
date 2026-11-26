@@ -48,16 +48,10 @@ def render_lock_analysis(db_connector, config):
     with st.spinner("正在采集锁信息..."):
         from backend.collectors.performance import PerformanceCollector
         collector = PerformanceCollector(db_connector)
-        collected = collector.collect()
-        lock_info = collected.get('data', {}).get('locks', {})
-        result = {
-            'status': 'error' if lock_info.get('error') else 'success',
-            'error': lock_info.get('error'),
-            'data': {'locks': lock_info.get('all_locks', [])},
-        }
+        result = collector.collect_locks()
 
-    if result['status'] == 'error':
-        st.error(f"采集失败: {result.get('error', 'Unknown error')}")
+    if result['status'] != 'success':
+        st.error(f"采集失败: {result.get('error', result.get('errors', 'Unknown error'))}")
         return
 
     locks = result.get('data', {}).get('locks', [])
@@ -134,11 +128,9 @@ def render_long_queries(db_connector, config):
     with st.spinner("正在采集查询信息..."):
         from backend.collectors.performance import PerformanceCollector
         collector = PerformanceCollector(db_connector)
-        collected = collector.collect()
-        queries = collected.get('data', {}).get('long_running_queries', [])
-        result = {'status': 'success', 'data': {'queries': queries}}
+        result = collector.collect_long_queries(threshold_seconds=threshold)
 
-    if result['status'] == 'error':
+    if result['status'] != 'success':
         st.error(f"采集失败: {result.get('error', 'Unknown error')}")
         return
 
@@ -205,11 +197,9 @@ def render_table_statistics(db_connector, config):
     with st.spinner("正在采集表统计信息..."):
         from backend.collectors.performance import PerformanceCollector
         collector = PerformanceCollector(db_connector)
-        collected = collector.collect()
-        tables = collected.get('data', {}).get('table_stats', [])[:int(limit)]
-        result = {'status': 'success', 'data': {'tables': tables}}
+        result = collector.collect_table_stats(limit=limit)
 
-    if result['status'] == 'error':
+    if result['status'] != 'success':
         st.error(f"采集失败: {result.get('error', 'Unknown error')}")
         return
 

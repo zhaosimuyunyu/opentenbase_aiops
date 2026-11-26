@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from psycopg2 import Error, sql
 from psycopg2.extras import Json
 from ..collectors.readonly_health import stale_statistics_nodes
+from ..utils.operational_memory import OperationalMemory
 from ..security.permissions import OperationRegistry
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
@@ -1027,6 +1028,26 @@ class RepairWorkflow:
                     cur, request_id, "execution_finished", actor=approver,
                     status=status, event_data=result,
                 )
+                if operation == "analyze_table":
+                    memory = None
+                    try:
+                        observation = ((request.get("evidence") or {}).get("observation") or {})
+                        memory = OperationalMemory()
+                        memory.save_case(
+                            category="stale_table_statistics",
+                            symptoms=(request.get("reason") or f"Stale statistics on {table}"),
+                            evidence={"audit_id": row[3], "precondition": result.get("precondition") or observation},
+                            root_cause="Optimizer statistics were stale on one or more data nodes.",
+                            solution=f"ANALYZE {table}",
+                            execution_result={"status": status, "request_id": request_id, "result": result},
+                            verification_result=result.get("postcondition") or {"verified": False},
+                            effectiveness=1.0 if status == "executed" else 0.0,
+                        )
+                    except Exception:
+                        logger.exception("Could not save verified ANALYZE outcome to operational memory")
+                    finally:
+                        if memory is not None:
+                            memory.close()
                 return {"request_id": request_id, "status": status, "result": result}
         finally:
             kb.close()

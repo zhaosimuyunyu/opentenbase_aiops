@@ -7,6 +7,7 @@ from ..tools.lock_audit_tool import LOCK_TOOL_SCHEMA, execute_get_database_locks
 from ..tools.execute_sql_tool import TOOL_SCHEMA as EXECUTE_SQL_TOOL_SCHEMA, execute_sql
 from ..tools.cluster_diagnostics_tool import TOOL_SCHEMA as CLUSTER_TOOL_SCHEMA, execute_cluster_diagnostics
 from ..security.permissions import OperationRegistry
+from ..utils.operational_memory import OperationalMemory
 
 MAX_KNOWLEDGE_TOOL_CALLS = 3
 MAX_DIAGNOSTIC_TOOL_CALLS = 2
@@ -16,6 +17,31 @@ TOOL_HANDLERS = {
     "search_knowledge": execute_search_knowledge,
     "get_database_locks": execute_get_database_locks,
 }
+
+MEMORY_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_operational_memory",
+        "description": "Recall verified OpenTenBase operational cases from prior incidents.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "category": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+
+def search_operational_memory(query, category=None, limit=5):
+    memory = OperationalMemory()
+    try:
+        return {"items": memory.recall(query=query, category=category, limit=limit)}
+    finally:
+        memory.close()
 
 
 class InvalidCompletionResponse(Exception):
@@ -115,6 +141,7 @@ class AIOpsAgent:
             "下方配置及工具读取，禁止声称只能看到用户贴出的快照或无法连接数据库。"
             "可调用 get_cluster_diagnostics 检查实时 CN/DN/GTM 拓扑和运行状态，"
             "可调用 get_database_locks 检查当前 CN 锁，可调用 search_knowledge 搜索全部知识库，"
+            "可调用 search_operational_memory 检索历史处置案例，区分已验证与未验证经验。"
             "也可调用 execute_sql 在当前连接账号权限范围内直接执行任意 SQL，"
             "并可用 node_name 将 SQL 发到任意一个已注册的 PostgreSQL 协议 CN 或 DN。"
             "GTM 使用原生协议，不能执行 PostgreSQL SQL，只能通过节点诊断做 TCP 探测。"
@@ -131,7 +158,7 @@ class AIOpsAgent:
             if item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str):
                 messages.append({"role": item["role"], "content": item["content"]})
         messages.append({"role": "user", "content": question})
-        tools = [KNOWLEDGE_TOOL_SCHEMA, LOCK_TOOL_SCHEMA, CLUSTER_TOOL_SCHEMA, EXECUTE_SQL_TOOL_SCHEMA]
+        tools = [KNOWLEDGE_TOOL_SCHEMA, MEMORY_TOOL_SCHEMA, LOCK_TOOL_SCHEMA, CLUSTER_TOOL_SCHEMA, EXECUTE_SQL_TOOL_SCHEMA]
         tool_trace = []
         rounds = 0
         response = self.client.chat.completions.create(
@@ -157,6 +184,7 @@ class AIOpsAgent:
                     arguments = json.loads(call.function.arguments or "{}")
                     handlers = {
                         "search_knowledge": execute_search_knowledge,
+                        "search_operational_memory": search_operational_memory,
                         "get_database_locks": execute_get_database_locks,
                         "get_cluster_diagnostics": execute_cluster_diagnostics,
                         "execute_sql": execute_sql,

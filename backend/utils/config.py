@@ -64,6 +64,12 @@ class Config:
     AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS: float = float(
         os.getenv("AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS", "210")
     )
+    AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS: int = max(
+        250, int(os.getenv("AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS", "2500"))
+    )
+    AIOPS_COLLECTION_LOCK_TIMEOUT_MS: int = max(
+        100, int(os.getenv("AIOPS_COLLECTION_LOCK_TIMEOUT_MS", "750"))
+    )
 
     # Application
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")

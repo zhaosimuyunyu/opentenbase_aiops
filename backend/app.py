@@ -20,6 +20,7 @@ from .ai.llm_client import DeepSeekClient
 from .ai.agent_client import AIOpsAgent
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .utils.operations_store import OperationsStore
+from .utils.operational_memory import OperationalMemory
 from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
@@ -141,6 +142,36 @@ def delete_agent_session(session_id: str):
         return {"session_id": session_id, "deleted": True}
     finally:
         store.close()
+
+
+class MemoryCaseRequest(BaseModel):
+    category: str
+    symptoms: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    root_cause: Optional[str] = None
+    solution: Optional[str] = None
+    execution_result: Optional[dict[str, Any]] = None
+    verification_result: Optional[dict[str, Any]] = None
+    effectiveness: Optional[float] = None
+
+
+@app.get("/api/memory/cases")
+def recall_memory_cases(category: Optional[str] = None, query: Optional[str] = None, limit: int = 10):
+    memory = OperationalMemory()
+    try:
+        return {"items": memory.recall(category=category, query=query, limit=limit)}
+    finally:
+        memory.close()
+
+
+@app.post("/api/memory/cases")
+def save_memory_case(request: MemoryCaseRequest):
+    memory = OperationalMemory()
+    try:
+        case_id = memory.save_case(**request.model_dump())
+        return {"case_id": case_id, "saved": True}
+    finally:
+        memory.close()
 
 
 class DiagnosisRequest(BaseModel):

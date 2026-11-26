@@ -14,6 +14,78 @@ class PerformanceCollector(BaseCollector):
         super().__init__(db_connector)
         self.config = config or Config()
 
+    def _query_rows(self, statement, params=None):
+        with self.db.get_cursor() as cursor:
+            cursor.execute(
+                "SELECT set_config('statement_timeout', %s, true), "
+                "set_config('lock_timeout', %s, true)",
+                (
+                    f"{self.config.AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS}ms",
+                    f"{self.config.AIOPS_COLLECTION_LOCK_TIMEOUT_MS}ms",
+                ),
+            )
+            cursor.execute(statement, params)
+            return cursor.fetchall()
+
+    def _collect_single(self, name, reader, key):
+        self.errors = []
+        try:
+            value = reader()
+            if isinstance(value, dict) and value.get("error"):
+                self._record_error(name, RuntimeError(value["error"]))
+                value = [] if key != "locks" else {}
+            return self._create_result(
+                status="success", data={key: value}
+            )
+        except Exception as error:
+            self._record_error(name, error)
+            return self._create_result(status="error", error=str(error))
+
+    def collect_locks(self):
+        """Collect only lock state so unrelated catalog scans cannot block this view."""
+        def read_locks():
+            info = self.get_lock_info()
+            return info.get("all_locks", info) if isinstance(info, dict) else info
+        result = self._collect_single("locks", read_locks, "locks")
+        lock_rows = result.get("data", {}).get("locks", [])
+        result["data"]["summary"] = {
+            "total_locks": len(lock_rows) if isinstance(lock_rows, list) else 0,
+            "blocked_count": sum(1 for row in lock_rows if not row.get("granted"))
+            if isinstance(lock_rows, list) else 0,
+        }
+        return result
+
+    def collect_long_queries(self, threshold_seconds=5):
+        threshold_seconds = max(1, min(int(threshold_seconds), 86400))
+        statement = """
+            SELECT pid, usename, datname, application_name, state, query,
+                   query_start, now() - query_start AS duration
+            FROM pg_catalog.pg_stat_activity
+            WHERE state != 'idle'
+              AND query NOT ILIKE '%%pg_stat_activity%%'
+              AND now() - query_start > (%s * interval '1 second')
+            ORDER BY duration DESC LIMIT 50
+        """
+        return self._collect_single(
+            "long_running_queries",
+            lambda: self._query_rows(statement, (threshold_seconds,)),
+            "queries",
+        )
+
+    def collect_table_stats(self, limit=50):
+        limit = max(1, min(int(limit), 500))
+        statement = """
+            SELECT schemaname, relname AS tablename, n_live_tup,
+                   n_dead_tup, n_tup_ins, n_tup_upd, n_tup_del,
+                   last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+            FROM pg_catalog.pg_stat_user_tables
+            WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY n_live_tup DESC LIMIT %s
+        """
+        return self._collect_single(
+            "table_stats", lambda: self._query_rows(statement, (limit,)), "tables"
+        )
+
     def collect(self) -> Dict[str, Any]:
         """Collect all performance metrics"""
         self.errors = []
@@ -52,7 +124,7 @@ class PerformanceCollector(BaseCollector):
         LIMIT 100;
         """
         try:
-            locks = self.db.execute_query(sql)
+            locks = self._query_rows(sql)
 
             blocking = [l for l in locks if not l['granted']] if locks else []
             active = [l for l in locks if l['granted']] if locks else []
@@ -88,7 +160,7 @@ class PerformanceCollector(BaseCollector):
         LIMIT 20;
         """
         try:
-            result = self.db.execute_query(sql)
+            result = self._query_rows(sql)
             return result if result else []
         except Exception as e:
             self._record_error('long_running_queries', e)
@@ -116,7 +188,7 @@ class PerformanceCollector(BaseCollector):
         LIMIT 50;
         """
         try:
-            result = self.db.execute_query(sql)
+            result = self._query_rows(sql)
             return result if result else []
         except Exception as e:
             self._record_error('table_stats', e)
@@ -139,7 +211,7 @@ class PerformanceCollector(BaseCollector):
         LIMIT 50;
         """
         try:
-            result = self.db.execute_query(sql)
+            result = self._query_rows(sql)
 
             # Find unused indexes
             unused = [idx for idx in result if idx['scans'] == 0] if result else []
