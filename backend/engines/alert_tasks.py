@@ -7,7 +7,7 @@ from ..utils.operations_store import OperationsStore
 
 
 class AlertTaskStore:
-    def create(self, alert_status, alerts, target):
+    def create(self, alert_status, alerts, target, worker_id=None):
         task_id = str(uuid.uuid4())
         store = OperationsStore()
         try:
@@ -19,6 +19,7 @@ class AlertTaskStore:
                         alert_count integer NOT NULL,
                         alert_summary jsonb NOT NULL,
                         target text,
+                        worker_id text,
                         status text NOT NULL,
                         audit_id text,
                         analysis_fallback boolean,
@@ -27,11 +28,14 @@ class AlertTaskStore:
                         updated_at timestamptz NOT NULL DEFAULT now()
                     )
                 """)
+                cursor.execute(
+                    "ALTER TABLE alert_audit_tasks ADD COLUMN IF NOT EXISTS worker_id text"
+                )
                 cursor.execute("""
                     INSERT INTO alert_audit_tasks(
-                        task_id, alert_status, alert_count, alert_summary, target, status
-                    ) VALUES (%s,%s,%s,%s,%s,'running')
-                """, (task_id, alert_status, len(alerts), Json(alerts), target))
+                        task_id, alert_status, alert_count, alert_summary, target, worker_id, status
+                    ) VALUES (%s,%s,%s,%s,%s,%s,'running')
+                """, (task_id, alert_status, len(alerts), Json(alerts), target, worker_id))
             return task_id
         finally:
             store.close()
@@ -75,18 +79,28 @@ class AlertTaskStore:
         finally:
             store.close()
 
-    def mark_interrupted(self):
+    def mark_interrupted(self, worker_id=None):
         store = OperationsStore()
         try:
             with store.conn, store.conn.cursor() as cursor:
                 cursor.execute("SELECT to_regclass('public.alert_audit_tasks')")
                 if cursor.fetchone()[0] is None:
                     return 0
-                cursor.execute("""
-                    UPDATE alert_audit_tasks
-                    SET status='interrupted', error_type='ServiceRestart', updated_at=now()
-                    WHERE status='running'
-                """)
+                cursor.execute(
+                    "ALTER TABLE alert_audit_tasks ADD COLUMN IF NOT EXISTS worker_id text"
+                )
+                if worker_id is None:
+                    cursor.execute("""
+                        UPDATE alert_audit_tasks
+                        SET status='interrupted', error_type='ServiceRestart', updated_at=now()
+                        WHERE status='running' AND worker_id IS NULL
+                    """)
+                else:
+                    cursor.execute("""
+                        UPDATE alert_audit_tasks
+                        SET status='interrupted', error_type='ServiceRestart', updated_at=now()
+                        WHERE status='running' AND (worker_id=%s OR worker_id IS NULL)
+                    """, (worker_id,))
                 return cursor.rowcount
         finally:
             store.close()

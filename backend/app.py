@@ -47,7 +47,9 @@ agent_worker_id = os.getenv("AIOPS_INSTANCE_ID") or socket.gethostname()
 async def lifespan(_app):
     scheduler_task = None
     try:
-        interrupted = await asyncio.to_thread(AlertTaskStore().mark_interrupted)
+        interrupted = await asyncio.to_thread(
+            AlertTaskStore().mark_interrupted, agent_worker_id
+        )
         if interrupted:
             logger.warning("Marked %s interrupted alert audit task(s) after service startup", interrupted)
     except Exception:
@@ -705,7 +707,7 @@ async def receive_alertmanager_alert(request: AlertmanagerRequest):
         })
     target = next((item.get("table") for item in labels if item.get("table")), None)
     task_store = AlertTaskStore()
-    task_id = task_store.create(request.status, labels, target)
+    task_id = task_store.create(request.status, labels, target, agent_worker_id)
 
     async def run_alert_audit():
         try:

@@ -153,7 +153,7 @@ opentenbase-aiops/
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
 | `AIOPS_INSTANCE_ID` | API 实例标识，用于将重启恢复限定在对应实例 | `opentenbase-aiops-api` |
 
-多副本部署时，每个同时运行的 API 副本需要唯一且重启前后稳定的 `AIOPS_INSTANCE_ID`。实例启动只会中断本实例及旧版未标记实例的未完成 Agent turn，避免影响其他副本的后台任务。
+多副本部署时，每个同时运行的 API 副本需要唯一且重启前后稳定的 `AIOPS_INSTANCE_ID`。实例启动只会中断本实例及旧版未标记实例的未完成 Agent turn 和告警审计任务，避免影响其他副本的后台任务。
 
 交互式智能问答 Agent 处于开发验证模式，提供实时 CN/DN/GTM 诊断、全分类知识检索，以及直接执行任意 SQL 的 `execute_sql` 工具。该聊天工具不做操作关键词拦截、不要求额外审批，可通过 `node_name` 将 SQL 发送到指定注册 CN/DN；未指定节点时走配置的 CN。GTM 使用原生协议，不接受 PostgreSQL SQL，只提供 TCP 诊断。数据库实际权限由 `DB_USER` 决定，工具不会提升或模拟权限。每次调用会记录目标节点、SQL SHA-256、命令类型、行数、错误码和耗时，不在执行审计表中保存 SQL 原文或结果。请在明确的开发/测试环境使用该模式，并由操作人员自行决定发送的语句。
 
