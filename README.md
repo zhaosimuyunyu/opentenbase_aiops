@@ -83,6 +83,23 @@ docker-compose logs -f
 - **Web UI**: http://localhost:8088
 - **API 文档**: http://localhost:8000/docs (可选)
 
+### 4. 生产运行检查
+
+```bash
+# 依赖 readiness 和容器状态
+curl http://localhost:8000/health
+docker compose ps
+
+# 查看周期巡检、退避和恢复状态
+curl http://localhost:8000/api/automation/status
+
+# 重复测量只读采集耗时、并发成功率和 SQLSTATE 错误分布
+docker compose exec -T aiops-api python -m scripts.benchmark_health_collection \
+  --runs 10 --concurrency 3
+```
+
+`/health` 同时检查 OpenTenBase 和 metadata PostgreSQL。周期巡检状态保存在 metadata PostgreSQL，API 重启后会恢复完成/失败状态和下一次重试时间。benchmark 只读目标数据库，不执行修复操作。
+
 ## 📦 项目结构
 
 ```
