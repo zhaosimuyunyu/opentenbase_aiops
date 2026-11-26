@@ -542,6 +542,7 @@ def get_automation_status():
                 cursor.execute(
                     """SELECT * FROM (
                         SELECT DISTINCT ON (scope) audit_id, created_at, risk_level,
+                               evidence->>'collection_duration_ms' AS collection_duration_ms,
                                evidence->>'trigger' AS trigger,
                                evidence->>'statistics_target' AS statistics_target,
                                CASE WHEN evidence->>'statistics_target' IS NULL
@@ -686,6 +687,8 @@ def audit_metrics():
         f"aiops_health_audit_latest_timestamp_seconds {latest['created_at'].timestamp() if latest else 0}",
         "# TYPE aiops_health_audit_latest_scheduled_timestamp_seconds gauge",
         f"aiops_health_audit_latest_scheduled_timestamp_seconds {scheduled.timestamp() if scheduled else 0}",
+        "# TYPE aiops_health_audit_latest_collection_duration_ms gauge",
+        f"aiops_health_audit_latest_collection_duration_ms {float(latest['collection_duration_ms']) if latest and latest.get('collection_duration_ms') else 0}",
         "# TYPE aiops_health_audit_latest_risk gauge",
     ]
     metrics.extend(

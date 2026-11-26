@@ -138,6 +138,12 @@ API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 
 
 这些场景验证功能闭环和故障发现，不构成生产并发负载下的容量或开销验收。独立修复账号未配置，本轮没有执行数据库修复。
 
+### 2026-11-26 采集耗时基线
+
+健康采集器记录 `collection_duration_ms`，范围包括 CN 检查、各 DN 直采、慢日志读取和节点连通探测，不包括 AI 分析及审计持久化。该值写入健康审计 evidence，并通过 Prometheus gauge `aiops_health_audit_latest_collection_duration_ms` 暴露。
+
+从 API 容器对当前空闲 `postgres` 实验集群串行采集 10 次，10/10 为 `success` 且无采集错误。耗时中位数为 191.18 ms，最近秩 P95 为 356.29 ms，最大值为 356.29 ms。一次后续 SSE 巡检测得 212.97 ms，审计详情和 Prometheus gauge 均回读到相同数值。该基线不包含并发业务负载，不能作为生产容量或业务影响验收。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。

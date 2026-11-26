@@ -26,7 +26,7 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         engine = ReadonlyAuditEngine()
         engine.config.AIOPS_AI_AUDIT_TIMEOUT_SECONDS = 0.01
         snapshot = {
-            "status": "success", "errors": {},
+            "status": "success", "errors": {}, "collection_duration_ms": 12.5,
             "checks": {
                 "locks": [], "connections": [], "max_connections": [{"max_connections": 100}],
                 "long_running_queries": [], "idle_transactions": [], "nodes": [],
@@ -47,6 +47,8 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         insert = store.return_value.conn.cursor.return_value.__enter__.return_value.execute.call_args_list[-1]
         self.assertIn("risk_level,status)", insert.args[0])
         self.assertIn("'completed'", insert.args[0])
+        persisted_evidence = json.loads(insert.args[1][2])
+        self.assertEqual(persisted_evidence["collection_duration_ms"], 12.5)
 
     async def test_persists_data_node_lock_blockers_in_performance_evidence(self):
         module = "backend.engines.readonly_audit_engine"

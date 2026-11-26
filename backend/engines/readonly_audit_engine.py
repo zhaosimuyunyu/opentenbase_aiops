@@ -422,6 +422,7 @@ class ReadonlyAuditEngine:
             'statistics_target': table,
             'audit_target': self.config.audit_target,
             'collection_status': snapshot['status'],
+            'collection_duration_ms': snapshot.get('collection_duration_ms'),
             'cluster_status': cluster_status,
             'performance_status': performance_status,
             'cluster': cluster,

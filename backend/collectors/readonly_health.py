@@ -1,6 +1,7 @@
 """Read-only OpenTenBase health checks with isolated query failures."""
 from datetime import datetime
 import socket
+import time
 
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
@@ -203,6 +204,7 @@ class ReadonlyHealthCollector:
         )
 
     def collect(self, *, table=None):
+        collection_started = time.perf_counter()
         connector = OpenTenBaseConnector(self.config)
         results = {}
         errors = {}
@@ -299,6 +301,7 @@ class ReadonlyHealthCollector:
             connector.close()
         return {
             "timestamp": datetime.now().astimezone().isoformat(),
+            "collection_duration_ms": round((time.perf_counter() - collection_started) * 1000, 2),
             "status": "success" if not errors else ("partial" if results else "error"),
             "checks": results,
             "errors": errors,
