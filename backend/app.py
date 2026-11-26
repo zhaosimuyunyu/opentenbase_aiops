@@ -30,12 +30,14 @@ from .engines.health_audit_scheduler import HealthAuditScheduler
 from .engines.sql_audit import audit_sql
 from .engines.audit_reanalysis import reanalyze_persisted_audit
 from .engines.alert_tasks import AlertTaskStore
+from .engines.agent_turns import AgentTurnStore, ensure_agent_sessions as _ensure_agent_sessions
 from .capabilities import CAPABILITIES
 
 logger = setup_logger(__name__)
 config = Config()
 distributed_collector = DistributedCollector(config)
 health_audit_scheduler = HealthAuditScheduler(config)
+agent_turn_tasks = set()
 
 
 @asynccontextmanager
@@ -47,6 +49,12 @@ async def lifespan(_app):
             logger.warning("Marked %s interrupted alert audit task(s) after service startup", interrupted)
     except Exception:
         logger.exception("Failed to recover alert audit task state")
+    try:
+        interrupted = await asyncio.to_thread(AgentTurnStore().mark_interrupted)
+        if interrupted:
+            logger.warning("Marked %s interrupted Agent turn(s) after service startup", interrupted)
+    except Exception:
+        logger.exception("Failed to recover Agent turn state")
     if config.AIOPS_AUTO_AUDIT_ENABLED:
         scheduler_task = asyncio.create_task(health_audit_scheduler.run_forever())
     try:
@@ -85,23 +93,14 @@ class QuestionRequest(BaseModel):
     question: str
     include_context: bool = True
     history: list[dict[str, str]] = Field(default_factory=list)
+    session_id: Optional[str] = None
+    turn_id: Optional[str] = None
 
 
 class AgentSessionRequest(BaseModel):
     session_id: str
     title: str = "新会话"
     messages: list[dict[str, Any]] = Field(default_factory=list)
-
-
-def _ensure_agent_sessions(cursor):
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS agent_sessions(
-            session_id text PRIMARY KEY,
-            title text NOT NULL,
-            messages jsonb NOT NULL DEFAULT '[]'::jsonb,
-            updated_at timestamptz NOT NULL DEFAULT now()
-        )
-    """)
 
 
 @app.get("/api/agent/sessions")
@@ -114,6 +113,43 @@ def list_agent_sessions():
             return {"items": [dict(row) for row in cursor.fetchall()]}
     finally:
         store.close()
+
+
+@app.get("/api/agent/turns")
+def list_agent_turns(session_id: str, limit: int = 20):
+    return {"items": AgentTurnStore().list_for_session(session_id, max(1, min(limit, 100)))}
+
+
+@app.get("/api/agent/turns/{turn_id}")
+def get_agent_turn(turn_id: str):
+    turn = AgentTurnStore().get(turn_id)
+    if turn is None:
+        raise HTTPException(status_code=404, detail="Agent turn not found")
+    return turn
+
+
+@app.get("/api/agent/turns/{turn_id}/stream")
+async def stream_agent_turn(turn_id: str):
+    async def stream():
+        yield f'data: {json.dumps({"type": "progress", "stage": "starting", "turn_id": turn_id}, ensure_ascii=False)}\n\n'
+        while True:
+            turn = await asyncio.to_thread(AgentTurnStore().get, turn_id)
+            if turn is None:
+                yield f'data: {json.dumps({"type": "error", "message": "Agent turn not found"})}\n\n'
+                return
+            if turn["status"] == "completed":
+                yield f'data: {json.dumps({"type": "result", "turn_id": turn_id, "answer": turn["answer"] or "", "tool_trace": turn["tool_trace"] or [], "rounds": turn["rounds"] or 0}, ensure_ascii=False, default=str)}\n\n'
+                return
+            if turn["status"] != "running":
+                yield f'data: {json.dumps({"type": "error", "turn_id": turn_id, "status": turn["status"], "message": turn["error_type"] or turn["status"]}, ensure_ascii=False)}\n\n'
+                return
+            yield f'data: {json.dumps({"type": "progress", "stage": "running", "turn_id": turn_id, "message": "Agent 仍在后台处理"}, ensure_ascii=False)}\n\n'
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.put("/api/agent/sessions/{session_id}")
@@ -137,14 +173,12 @@ def save_agent_session(session_id: str, request: AgentSessionRequest):
 
 @app.delete("/api/agent/sessions/{session_id}")
 def delete_agent_session(session_id: str):
-    store = OperationsStore()
     try:
-        with store.conn, store.conn.cursor() as cursor:
-            _ensure_agent_sessions(cursor)
-            cursor.execute("DELETE FROM agent_sessions WHERE session_id=%s", (session_id,))
+        AgentTurnStore().delete_session(session_id)
         return {"session_id": session_id, "deleted": True}
-    finally:
-        store.close()
+    except Exception as error:
+        logger.exception("Failed to delete Agent session")
+        raise HTTPException(status_code=503, detail="Could not delete Agent session") from error
 
 
 class MemoryCaseRequest(BaseModel):
@@ -302,9 +336,20 @@ async def ask_question(request: QuestionRequest):
 
 @app.post("/api/qa/ask/stream")
 async def stream_question(request: QuestionRequest):
-    """Run the live Agent while keeping the UI informed over SSE."""
+    """Run a durable Agent turn and stream progress without tying it to the client."""
     events = asyncio.Queue()
     loop = asyncio.get_running_loop()
+    turn_store = AgentTurnStore()
+    try:
+        turn = await asyncio.to_thread(
+            turn_store.start, request.session_id, request.turn_id, request.question
+        )
+    except Exception as error:
+        logger.exception("Failed to create Agent turn")
+        raise HTTPException(status_code=503, detail="Could not persist Agent turn") from error
+    turn_id = turn["turn_id"]
+    if not turn["created"]:
+        raise HTTPException(status_code=409, detail="Agent turn ID already exists")
 
     async def run_agent():
         agent = AIOpsAgent(config)
@@ -320,18 +365,29 @@ async def stream_question(request: QuestionRequest):
                 )
             )
             trace = result.get("tool_trace") or []
+            await asyncio.to_thread(turn_store.complete, turn_id, result)
             await events.put({"type": "result", "answer": result.get("answer", ""),
                               "tool_trace": trace, "rounds": result.get("rounds", 0),
-                              "runtime_context": result.get("runtime_context")})
+                              "runtime_context": result.get("runtime_context"),
+                              "turn_id": turn_id})
         except Exception as error:
             logger.exception("Failed to stream Agent answer")
-            await events.put({"type": "error", "message": f"{type(error).__name__}: {error}"})
+            try:
+                await asyncio.to_thread(turn_store.fail, turn_id, type(error).__name__)
+            except Exception:
+                logger.exception("Failed to persist Agent turn failure")
+            await events.put({
+                "type": "error", "turn_id": turn_id,
+                "message": f"{type(error).__name__}: {error}",
+            })
         finally:
             agent.client.close()
 
     async def stream():
         task = asyncio.create_task(run_agent())
-        yield 'data: {"type":"progress","stage":"starting","message":"已连接 Agent"}\n\n'
+        agent_turn_tasks.add(task)
+        task.add_done_callback(agent_turn_tasks.discard)
+        yield f'data: {json.dumps({"type": "progress", "stage": "starting", "message": "已连接 Agent", "turn_id": turn_id}, ensure_ascii=False)}\n\n'
         while True:
             try:
                 event = await asyncio.wait_for(events.get(), timeout=10)

@@ -20,8 +20,6 @@ def save_session(api_base, session_id, session):
 
 def load_sessions(api_base):
     sessions = st.session_state.agent_sessions
-    if st.session_state.agent_sessions_loaded:
-        return
     try:
         response = requests.get(f"{api_base}/api/agent/sessions", timeout=15)
         response.raise_for_status()
@@ -38,9 +36,29 @@ def load_sessions(api_base):
         session_id = str(uuid.uuid4())
         sessions[session_id] = {"title": "新会话", "messages": legacy_messages}
         save_session(api_base, session_id, sessions[session_id])
-    st.session_state.agent_sessions_loaded = True
     if st.session_state.active_agent_session not in sessions:
         st.session_state.active_agent_session = next(iter(sessions))
+
+
+def receive_turn(api_base, turn_id, message_placeholder):
+    with requests.get(
+        f"{api_base}/api/agent/turns/{turn_id}/stream",
+        stream=True,
+        timeout=900,
+    ) as response:
+        response.raise_for_status()
+        for raw_line in response.iter_lines(chunk_size=1):
+            if not raw_line or not raw_line.startswith(b"data:"):
+                continue
+            event = json.loads(raw_line[5:])
+            if event.get("type") == "progress":
+                message_placeholder.info(event.get("message", "后台任务仍在运行"))
+            elif event.get("type") == "result":
+                return event
+            elif event.get("type") == "error":
+                raise RuntimeError(event.get("message", "后台 Agent 任务未完成"))
+    return None
+
 
 def render(config):
     """Render AI chat assistant page"""
@@ -59,7 +77,6 @@ def render(config):
 
     st.session_state.setdefault("agent_sessions", {})
     st.session_state.setdefault("active_agent_session", None)
-    st.session_state.setdefault("agent_sessions_loaded", False)
     load_sessions(api_base)
     sessions = st.session_state.agent_sessions
     with st.sidebar:
@@ -98,6 +115,31 @@ def render(config):
                 except requests.RequestException as error:
                     st.error(f"删除会话失败：{error}")
     active_session = sessions[st.session_state.active_agent_session]
+    try:
+        response = requests.get(
+            f"{api_base}/api/agent/turns",
+            params={"session_id": st.session_state.active_agent_session, "limit": 1},
+            timeout=15,
+        )
+        response.raise_for_status()
+        latest_turns = response.json().get("items", [])
+    except requests.RequestException:
+        latest_turns = []
+    if latest_turns and latest_turns[0]["status"] == "running":
+        pending_turn = latest_turns[0]
+        st.info("上一条回复仍在后台生成。")
+        if st.button("恢复接收后台回复", key=f"resume-{pending_turn['turn_id']}"):
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                try:
+                    receive_turn(api_base, pending_turn["turn_id"], placeholder)
+                except Exception as error:
+                    st.error(f"恢复回复失败：{error}")
+            st.rerun()
+    elif latest_turns and latest_turns[0]["status"] == "interrupted":
+        st.warning("服务重启时中断了上一条任务，原问题仍保存在会话中，可重新提交。")
+    elif latest_turns and latest_turns[0]["status"] == "failed":
+        st.warning("上一条 Agent 任务执行失败，原问题仍保存在会话中，可重新提交。")
 
     # Quick action buttons
     st.markdown("#### 💬 快速提问")
@@ -143,10 +185,12 @@ def render(config):
 def handle_user_input(user_input, api_base, active_session, config):
     """Handle user chat input"""
 
+    turn_id = str(uuid.uuid4())
     # Add user message to history
     active_session["messages"].append({
         "role": "user",
-        "content": user_input
+        "content": user_input,
+        "turn_id": turn_id,
     })
     if active_session["title"] == "新会话":
         active_session["title"] = user_input[:24] + ("…" if len(user_input) > 24 else "")
@@ -169,6 +213,8 @@ def handle_user_input(user_input, api_base, active_session, config):
                 f"{api_base}/api/qa/ask/stream",
                 json={
                     "question": user_input,
+                    "session_id": session_id,
+                    "turn_id": turn_id,
                     "history": [
                         {"role": msg["role"], "content": msg["content"]}
                         for msg in active_session["messages"][:-1]
@@ -222,23 +268,26 @@ def handle_user_input(user_input, api_base, active_session, config):
                 active_session["messages"].append({
                     "role": "assistant",
                     "content": assistant_message,
-                    "tool_calls": tool_calls
+                    "tool_calls": tool_calls,
+                    "turn_id": turn_id,
                 })
-                if not save_session(api_base, session_id, active_session):
-                    st.warning("回复已生成，但会话保存失败。")
 
             else:
-                error_msg = f"❌ 请求失败: {response.status_code}\n\n{response.text}"
-                message_placeholder.markdown(error_msg)
-
-        except requests.ConnectionError:
-            error_msg = "❌ 无法连接到 API 服务，请确认服务正在运行"
-            message_placeholder.markdown(error_msg)
-        except requests.Timeout:
-            error_msg = "⏱️ 请求超时，请稍后重试"
-            message_placeholder.markdown(error_msg)
+                raise RuntimeError(f"请求失败：{response.status_code} {response.text}")
         except Exception as e:
-            error_msg = f"❌ 发生错误: {str(e)}"
-            message_placeholder.markdown(error_msg)
+            try:
+                turn = requests.get(
+                    f"{api_base}/api/agent/turns/{turn_id}", timeout=10
+                ).json()
+            except requests.RequestException:
+                turn = None
+            if turn and turn.get("status") == "completed":
+                message_placeholder.markdown(turn.get("answer", ""))
+            elif turn and turn.get("status") == "running":
+                message_placeholder.info("连接已断开，Agent 仍在后台处理。稍后可恢复接收回复。")
+            elif turn and turn.get("status") == "interrupted":
+                message_placeholder.warning("Agent 服务重启时中断了任务，问题已保存在会话中。")
+            else:
+                message_placeholder.error(f"发生错误：{e}")
 
     st.rerun()
