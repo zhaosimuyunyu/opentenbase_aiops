@@ -26,6 +26,9 @@ class HealthAuditScheduler:
             "next_retry_at": None,
             "last_error_type": None,
             "consecutive_failures": 0,
+            "completed_targets": [],
+            "skipped_targets": [],
+            "failed_targets": [],
         }
 
     def runtime_status(self):
@@ -105,6 +108,10 @@ class HealthAuditScheduler:
     async def run_forever(self):
         while True:
             delay = self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS
+            completed_targets = []
+            skipped_targets = []
+            failed_targets = []
+            cycle_error_type = None
             for table in self.config.AIOPS_AUTO_AUDIT_TARGETS:
                 self._set_runtime_status(
                     state="running",
@@ -112,6 +119,9 @@ class HealthAuditScheduler:
                     started_at=datetime.now(timezone.utc).isoformat(),
                     finished_at=None,
                     next_retry_at=None,
+                    completed_targets=list(completed_targets),
+                    skipped_targets=list(skipped_targets),
+                    failed_targets=list(failed_targets),
                 )
                 try:
                     result = await self.run_once(scheduled=True, table=table)
@@ -143,30 +153,39 @@ class HealthAuditScheduler:
                                     "Could not persist automatic repair result for audit %s",
                                     result["audit_id"],
                                 )
-                        self._set_runtime_status(
-                            state="completed",
-                            finished_at=datetime.now(timezone.utc).isoformat(),
-                            last_error_type=None,
-                            consecutive_failures=0,
-                        )
+                        completed_targets.append(table or "full")
+                        self._set_runtime_status(completed_targets=list(completed_targets))
                     else:
-                        self._set_runtime_status(
-                            state="skipped",
-                            finished_at=datetime.now(timezone.utc).isoformat(),
-                        )
+                        skipped_targets.append(table or "full")
+                        self._set_runtime_status(skipped_targets=list(skipped_targets))
                         delay = min(delay, 30)
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
-                    failure_count = self._runtime_status["consecutive_failures"] + 1
-                    self._set_runtime_status(
-                        state="failed",
-                        finished_at=datetime.now(timezone.utc).isoformat(),
-                        last_error_type=type(error).__name__,
-                        consecutive_failures=failure_count,
-                    )
+                    failed_targets.append(table or "full")
+                    cycle_error_type = type(error).__name__
+                    self._set_runtime_status(failed_targets=list(failed_targets))
                     logger.exception("Scheduled health audit failed for %s", table)
                     delay = min(delay, 60)
+            if failed_targets:
+                self._set_runtime_status(
+                    state="failed",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    last_error_type=cycle_error_type,
+                    consecutive_failures=self._runtime_status["consecutive_failures"] + 1,
+                )
+            elif skipped_targets:
+                self._set_runtime_status(
+                    state="skipped",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                )
+            else:
+                self._set_runtime_status(
+                    state="completed",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    last_error_type=None,
+                    consecutive_failures=0,
+                )
             self._set_runtime_status(
                 next_retry_at=(datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
             )

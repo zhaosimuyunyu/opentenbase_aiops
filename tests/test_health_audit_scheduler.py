@@ -50,6 +50,31 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["consecutive_failures"], 1)
         self.assertIsNotNone(datetime.fromisoformat(status["next_retry_at"]))
 
+    async def test_later_target_success_does_not_hide_failure_in_same_cycle(self):
+        scheduler = HealthAuditScheduler(SimpleNamespace(
+            AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=120,
+            AIOPS_AUTO_AUDIT_TARGETS=("public.failed", "public.healthy"),
+            AIOPS_AUTO_REPAIR_ENABLED=False,
+        ))
+        scheduler.run_once = AsyncMock(side_effect=[
+            RuntimeError("target unavailable"),
+            {"audit_id": "audit-healthy"},
+        ])
+
+        with patch("backend.engines.health_audit_scheduler.asyncio.sleep", new=AsyncMock(
+            side_effect=asyncio.CancelledError
+        )) as sleep:
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.run_forever()
+
+        status = scheduler.runtime_status()
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(status["failed_targets"], ["public.failed"])
+        self.assertEqual(status["completed_targets"], ["public.healthy"])
+        self.assertEqual(status["consecutive_failures"], 1)
+        self.assertEqual(status["last_error_type"], "RuntimeError")
+        sleep.assert_awaited_once_with(60)
+
     async def test_skips_audit_when_another_instance_holds_database_lock(self):
         knowledge_base = MagicMock()
         knowledge_base.conn.closed = False

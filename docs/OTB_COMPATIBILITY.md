@@ -154,6 +154,8 @@ API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度�
 
 调度器运行状态现通过 `/api/automation/status` 暴露 `state`、当前目标、开始/结束时间、下次重试时间、最近错误类型和连续失败数。Prometheus 暴露 running、连续失败、开始时间和下次重试 gauge，并增加 scheduler failure 告警。API 容器在上一轮计划审计尚处 900 秒去重窗口内重启后，实测状态为 `skipped`，并安排 30 秒后重查，连续失败数为 0。
 
+多目标调度状态按整轮汇总，单个目标失败会保留在 `failed_targets`，后续目标成功不会把本轮伪报为完成。单测覆盖失败后目标成功、整轮状态仍为 `failed` 且按 60 秒重试；当前现场只配置 full target，没有人为制造目标故障。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。
