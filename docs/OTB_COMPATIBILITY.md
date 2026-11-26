@@ -144,6 +144,8 @@ API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 
 
 从 API 容器对当前空闲 `postgres` 实验集群串行采集 10 次，10/10 为 `success` 且无采集错误。耗时中位数为 191.18 ms，最近秩 P95 为 356.29 ms，最大值为 356.29 ms。一次后续 SSE 巡检测得 212.97 ms，审计详情和 Prometheus gauge 均回读到相同数值。该基线不包含并发业务负载，不能作为生产容量或业务影响验收。
 
+另以 3 个并发 worker 同时执行只读全量采集，3/3 为 `success` 且无采集错误，总墙钟时间 650.28 ms，各 collector 耗时为 258.02–649.21 ms。该小规模并发探测用于检查基本并发兼容，不替代具有代表性的业务并发、数据规模和持续时间测试。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。
