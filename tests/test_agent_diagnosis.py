@@ -231,10 +231,19 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(search.await_count, 2)
         self.assertIn("tools", completion.call_args_list[1].kwargs)
         self.assertEqual(len(report["knowledge_refs"]), 2)
-        self.assertEqual(report["tool_trace"], [
+        self.assertEqual([
+            {key: value for key, value in item.items() if key != "duration_ms"}
+            for item in report["tool_trace"]
+        ], [
             {"round": 1, "tool": "search_knowledge", "hits": 1, "failed": False},
             {"round": 2, "tool": "search_knowledge", "hits": 1, "failed": False},
         ])
+        self.assertTrue(all(item["duration_ms"] >= 0 for item in report["tool_trace"]))
+        self.assertEqual(len(report["model_trace"]), 3)
+        self.assertAlmostEqual(
+            report["model_duration_ms"],
+            sum(item["duration_ms"] for item in report["model_trace"]),
+        )
         self.assertEqual(report["structured"]["analysis_source"], "model")
 
     async def test_knowledge_search_call_limit_is_enforced_per_tool(self):
@@ -267,6 +276,50 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(search.await_count, 3)
         self.assertEqual(sum(item["failed"] for item in report["tool_trace"]), 1)
         self.assertIn("KnowledgeToolCallLimit", report["tool_errors"])
+        self.assertEqual(len(report["model_trace"]), 2)
+
+    async def test_forced_report_uses_compact_unique_references(self):
+        agent = AIOpsAgent(SimpleNamespace(
+            DEEPSEEK_API_KEY="fixture-key",
+            DEEPSEEK_API_BASE="https://example.invalid/v1",
+            DEEPSEEK_TIMEOUT_SECONDS=1,
+            DEEPSEEK_MODEL="fixture-model",
+        ))
+        self.addCleanup(agent.client.close)
+        calls = [SimpleNamespace(
+            id=f"search-{index}",
+            function=SimpleNamespace(
+                name="search_knowledge", arguments=f'{{"query":"query {index}"}}'
+            ),
+        ) for index in range(4)]
+        tool_call_response = SimpleNamespace(content=None, tool_calls=calls)
+        final = SimpleNamespace(
+            content='{"root_cause":"Prepared transaction blocks sessions",'
+                    '"risk_level":"high","evidence":[],"recommendations":[]}',
+            tool_calls=[],
+        )
+        references = [{
+            "source_url": f"https://example.invalid/doc-{index % 2}",
+            "document_title": f"doc-{index % 2}",
+            "content": "reference text " * 200,
+        } for index in range(8)]
+        with patch.object(agent.client.chat.completions, "create", Mock(side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=tool_call_response)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=tool_call_response)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=tool_call_response)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=final)]),
+        ])) as completion, patch(
+            "backend.ai.agent_client.execute_search_knowledge",
+            AsyncMock(return_value={"results": references}),
+        ):
+            report = await agent.diagnose("Review locks", {})
+
+        forced_report_request = completion.call_args_list[-1].kwargs
+        forced_report_prompt = forced_report_request["messages"][-1]["content"]
+        self.assertEqual(forced_report_request["max_tokens"], 1200)
+        self.assertLessEqual(forced_report_prompt.count("https://example.invalid/doc-"), 2)
+        self.assertLess(len(forced_report_prompt), 12000)
+        self.assertFalse(report["analysis_fallback"])
 
     async def test_invalid_report_preserves_retrieved_references(self):
         await self._check_failed_report(

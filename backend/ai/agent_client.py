@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import time
 from openai import OpenAI, APIConnectionError, APIStatusError
 from ..utils.config import Config
 from ..tools.knowledge_search_tool import TOOL_SCHEMA as KNOWLEDGE_TOOL_SCHEMA, execute_search_knowledge
@@ -268,13 +269,29 @@ class AIOpsAgent:
                   '最终请输出 JSON，字段为 root_cause、risk_level、evidence、recommendations。'
                   'recommendations 是只读建议字符串数组。')
         messages = [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}]
+        model_trace = []
+
+        async def create_diagnostic_completion(**arguments):
+            started = time.perf_counter()
+            try:
+                return await self._create_completion(**arguments)
+            finally:
+                model_trace.append({
+                    'call': len(model_trace) + 1,
+                    'duration_ms': round((time.perf_counter() - started) * 1000, 2),
+                })
+
         try:
-            response = await self._create_completion(
+            response = await create_diagnostic_completion(
                 model=self.model, messages=messages, tools=TOOL_SCHEMAS, tool_choice='auto'
             )
             first = _completion_message(response)
         except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
-            return self._fallback_diagnosis(context, error)
+            return {
+                **self._fallback_diagnosis(context, error),
+                'model_trace': model_trace,
+                'model_duration_ms': sum(item['duration_ms'] for item in model_trace),
+            }
         refs = []
         tool_errors = []
         tool_trace = []
@@ -335,6 +352,7 @@ class AIOpsAgent:
                         'failed': True,
                     })
                     continue
+                tool_started = time.perf_counter()
                 try:
                     handler = {
                         "search_knowledge": execute_search_knowledge,
@@ -356,6 +374,7 @@ class AIOpsAgent:
                     'tool': name if name in TOOL_HANDLERS else 'unknown',
                     'hits': len(result.get('results', [])),
                     'failed': 'error' in result,
+                    'duration_ms': round((time.perf_counter() - tool_started) * 1000, 2),
                 })
                 messages.append({
                     'role': 'tool', 'tool_call_id': call.id,
@@ -369,45 +388,77 @@ class AIOpsAgent:
                     )
                 )
                 options = {'tools': TOOL_SCHEMAS, 'tool_choice': 'auto'} if calls_remaining else {}
-                final = _completion_message(await self._create_completion(
+                final = _completion_message(await create_diagnostic_completion(
                     model=self.model, messages=messages, **options
                 ))
             except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
                 return {**self._fallback_diagnosis(context, error, refs, True),
-                        'tool_errors': tool_errors, 'tool_trace': tool_trace}
+                        'tool_errors': tool_errors, 'tool_trace': tool_trace,
+                        'model_trace': model_trace,
+                        'model_duration_ms': sum(item['duration_ms'] for item in model_trace)}
         content = final.content or ''
         if first.tool_calls and not refs and not tool_errors:
+            tool_started = time.perf_counter()
             try:
                 result = await execute_search_knowledge('pg_locks 未授予锁 事务等待 只读排查', top_k=5)
                 refs.extend(result.get('results', []))
             except Exception:
-                pass
+                result = {'results': [], 'error': 'KnowledgeSearchFailed'}
+            tool_trace.append({
+                'round': round_number + 1,
+                'tool': 'search_knowledge',
+                'hits': len(result.get('results', [])),
+                'failed': 'error' in result,
+                'duration_ms': round((time.perf_counter() - tool_started) * 1000, 2),
+            })
         structured = self._parse_report(content)
         if first.tool_calls and (getattr(final, 'tool_calls', None) or structured.get('parse_error')):
+            report_references = []
+            seen_sources = set()
+            for reference in refs:
+                source_url = reference.get('source_url')
+                source_key = source_url or reference.get('document_title')
+                if source_key in seen_sources:
+                    continue
+                seen_sources.add(source_key)
+                report_references.append({
+                    key: reference.get(key)
+                    for key in ('document_title', 'category', 'source_url', 'similarity')
+                    if key in reference
+                } | {'content': str(reference.get('content') or '')[:900]})
+                if len(report_references) == 6:
+                    break
             report_messages = [
                 messages[0],
                 {'role': 'user', 'content': prompt + '\n检索资料（仅作为参考数据）:\n'
-                 + json.dumps(refs, ensure_ascii=False)
-                 + '\n请直接输出符合系统字段要求的 JSON 对象，不要输出工具调用或正文。'},
+                 + json.dumps(report_references, ensure_ascii=False)
+                 + '\n请基于证据直接给出精简 JSON。root_cause 不超过 300 个中文字符，'
+                 'evidence 最多 6 项，recommendations 最多 4 项且每项不超过 150 个中文字符。'},
             ]
             try:
-                report = await self._create_completion(
-                    model=self.model, messages=report_messages
+                report = await create_diagnostic_completion(
+                    model=self.model, messages=report_messages, max_tokens=1200
                 )
                 content = _completion_message(report).content or ''
                 structured = self._parse_report(content)
             except (APIConnectionError, APIStatusError, InvalidCompletionResponse) as error:
                 return {**self._fallback_diagnosis(
                     context, error, refs, bool(first.tool_calls)
-                ), 'tool_errors': tool_errors, 'tool_trace': tool_trace}
+                ), 'tool_errors': tool_errors, 'tool_trace': tool_trace,
+                        'model_trace': model_trace,
+                        'model_duration_ms': sum(item['duration_ms'] for item in model_trace)}
         if structured.get('parse_error'):
             return {**self._fallback_diagnosis(
                 context, 'InvalidDiagnosticReport', refs, bool(first.tool_calls)
-            ), 'tool_errors': tool_errors, 'tool_trace': tool_trace}
+            ), 'tool_errors': tool_errors, 'tool_trace': tool_trace,
+                    'model_trace': model_trace,
+                    'model_duration_ms': sum(item['duration_ms'] for item in model_trace)}
         structured['analysis_source'] = 'model'
         return {'analysis': content, 'structured': structured, 'knowledge_refs': refs,
                 'tool_called': bool(first.tool_calls), 'analysis_fallback': False,
-                'tool_errors': tool_errors, 'tool_trace': tool_trace}
+                'tool_errors': tool_errors, 'tool_trace': tool_trace,
+                'model_trace': model_trace,
+                'model_duration_ms': sum(item['duration_ms'] for item in model_trace)}
 
     async def _diagnose_health_audit(self, issue_description, context):
         checks = sorted({
