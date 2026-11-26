@@ -13,6 +13,8 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertIn("key_guc", CHECKS)
         self.assertIn("storage", CHECKS)
         self.assertIn("data_node_lock_blockers", CHECKS)
+        self.assertIn("long_running_queries", CHECKS)
+        self.assertIn("application_name", CHECKS["long_running_queries"])
 
     def test_distributed_collect_rejects_arbitrary_sql(self):
         collector = DistributedCollector(SimpleNamespace())
@@ -82,6 +84,8 @@ class NodeConnectivityTests(unittest.TestCase):
             collector, "_collect_data_node_prepared_xacts", return_value=([], {})
         ), patch.object(
             collector, "_collect_data_node_lock_blockers", return_value=([], {})
+        ), patch.object(
+            collector, "_collect_data_node_long_queries", return_value=([], {})
         ), patch.object(
             collector, "_collect_data_node_stats", side_effect=[([], limits), (targeted, {})]
         ) as stats:

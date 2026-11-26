@@ -128,7 +128,8 @@ class ReadonlyAuditEngine:
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
                     'table_stats', 'index_usage', 'storage', 'data_node_table_stats',
-                    'data_node_stats_fallback', 'data_node_lock_blockers')}
+                    'data_node_stats_fallback', 'data_node_lock_blockers',
+                    'data_node_long_running_queries')}
         findings = []
         lock_rows = checks.get('locks')
         blocked_locks = [row for row in lock_rows or [] if not row['granted']]
@@ -212,11 +213,12 @@ class ReadonlyAuditEngine:
                 'observed': f'Client backends on the connected CN use {usage}% of max_connections',
                 'evidence': cluster['connection_capacity'],
             })
-        long_queries = checks.get('long_running_queries') or []
+        long_queries = list(checks.get('long_running_queries') or [])
+        long_queries.extend(checks.get('data_node_long_running_queries') or [])
         if long_queries:
             findings.append({
                 'check': 'long_running_queries', 'severity': 'medium',
-                'observed': f'{len(long_queries)} queries exceeded the collector threshold',
+                'observed': f'{len(long_queries)} queries exceeded the collector threshold across CN/DN',
                 'evidence': long_queries,
             })
         idle_transactions = checks.get('idle_transactions') or []
@@ -365,6 +367,7 @@ class ReadonlyAuditEngine:
             'table_stats', 'index_usage',
             'storage',
             'data_node_lock_blockers',
+            'data_node_long_running_queries',
         }
         cluster_errors = cluster_checks.intersection(snapshot['errors'])
         cluster_node_errors = {
@@ -375,7 +378,10 @@ class ReadonlyAuditEngine:
         performance_errors = performance_checks.intersection(snapshot['errors'])
         performance_node_errors = {
             name for name in snapshot['errors']
-            if name.startswith(('data_node_stats:', 'data_node_lock_blockers:'))
+            if name.startswith((
+                'data_node_stats:', 'data_node_lock_blockers:',
+                'data_node_long_running_queries:',
+            ))
         }
         performance_errors.update(performance_node_errors)
         unreachable_nodes = any(

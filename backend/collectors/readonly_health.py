@@ -118,7 +118,7 @@ CHECKS = {
         WHERE a.backend_type = 'client backend'
     """,
     "long_running_queries": """
-        SELECT pid, usename, datname, state, query, query_start,
+        SELECT pid, usename, datname, application_name, state, query, query_start,
                now() - query_start AS duration
         FROM pg_stat_activity
         WHERE state != 'idle'
@@ -224,6 +224,9 @@ class ReadonlyHealthCollector:
                 blocker_rows, blocker_errors = self._collect_data_node_lock_blockers(connection, nodes)
                 results["data_node_lock_blockers"] = blocker_rows
                 errors.update(blocker_errors)
+                long_query_rows, long_query_errors = self._collect_data_node_long_queries(connection, nodes)
+                results["data_node_long_running_queries"] = long_query_rows
+                errors.update(long_query_errors)
                 node_stats, node_stats_errors = self._collect_data_node_stats(
                     connection, nodes, table=table
                 )
@@ -418,3 +421,24 @@ class ReadonlyHealthCollector:
                 connection.rollback()
                 errors[f"data_node_lock_blockers:{name}"] = _collection_error(error)
         return blockers, errors
+
+    def _collect_data_node_long_queries(self, connection, nodes):
+        queries = []
+        errors = {}
+        for node in nodes:
+            if node.get("node_type") != "D":
+                continue
+            name = node.get("node_name")
+            try:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    self._set_query_timeouts(cursor)
+                    cursor.execute(
+                        sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
+                        (CHECKS["long_running_queries"],),
+                    )
+                    queries.extend({"node_name": name, **dict(row)} for row in cursor.fetchall())
+                connection.rollback()
+            except Exception as error:
+                connection.rollback()
+                errors[f"data_node_long_running_queries:{name}"] = _collection_error(error)
+        return queries, errors

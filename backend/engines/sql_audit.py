@@ -84,7 +84,7 @@ def audit_sql(statement, *, explain=True, config=None):
                 cursor.execute("SET LOCAL lock_timeout = '750ms'")
                 cursor.execute(sql.SQL("EXPLAIN (FORMAT JSON) {} ").format(sql.SQL(query)))
                 row = cursor.fetchone()
-                result["explain"] = row[0] if row else None
+                result["explain"] = row.get("QUERY PLAN") if row else None
             connection.rollback()
         except Exception as error:
             result["explain_error"] = {

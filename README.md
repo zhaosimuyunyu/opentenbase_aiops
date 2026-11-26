@@ -127,7 +127,7 @@ opentenbase-aiops/
 | `DEEPSEEK_MODEL` | 模型名称 | `deepseek-chat` |
 | `DEEPSEEK_TIMEOUT_SECONDS` | 单次巡检模型请求的超时秒数 | `45` |
 | `AIOPS_HEALTH_AUDIT_HTTP_TIMEOUT_SECONDS` | 巡检页面等待 API 响应的超时秒数 | `210` |
-| `AIOPS_AUTO_AUDIT_ENABLED` | 是否启用周期健康巡检 | `false` |
+| `AIOPS_AUTO_AUDIT_ENABLED` | 是否启用周期健康巡检 | `true` |
 | `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` | 周期巡检间隔秒数，最小 60 秒 | `900` |
 | `AIOPS_AUTO_AUDIT_TABLE` | 周期巡检统计目标，支持逗号分隔，例如 `public.orders,public.items` | 空，使用全库采集 |
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |

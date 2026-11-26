@@ -14,7 +14,7 @@ class SqlAuditTests(unittest.TestCase):
         connector = MagicMock()
         connection = connector.return_value.connect.return_value
         cursor = connection.cursor.return_value.__enter__.return_value
-        cursor.fetchone.return_value = ({"QUERY PLAN": [{"Plan": {"Node Type": "Seq Scan"}}]},)
+        cursor.fetchone.return_value = {"QUERY PLAN": [{"Plan": {"Node Type": "Seq Scan"}}]}
         with patch("backend.engines.sql_audit.OpenTenBaseConnector", connector):
             result = audit_sql("SELECT id FROM public.orders")
         self.assertIsNotNone(result["explain"])

@@ -85,7 +85,7 @@ services:
       - AIOPS_AUTO_REPAIR_TARGETS=${AIOPS_AUTO_REPAIR_TARGETS:-}
       - AIOPS_APPROVER_TOKENS=${AIOPS_APPROVER_TOKENS:-}
       - AIOPS_APPROVER_ID=${AIOPS_APPROVER_ID:-local-operator}
-      - AIOPS_AUTO_AUDIT_ENABLED=${AIOPS_AUTO_AUDIT_ENABLED:-false}
+      - AIOPS_AUTO_AUDIT_ENABLED=${AIOPS_AUTO_AUDIT_ENABLED:-true}
       - DEEPSEEK_TIMEOUT_SECONDS=${DEEPSEEK_TIMEOUT_SECONDS:-150}
       - AIOPS_AI_AUDIT_TIMEOUT_SECONDS=${AIOPS_AI_AUDIT_TIMEOUT_SECONDS:-120}
       - AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=${AIOPS_AUTO_AUDIT_INTERVAL_SECONDS:-900}
@@ -114,6 +114,7 @@ services:
       - KNOWLEDGE_DB_PASSWORD=${KNOWLEDGE_DB_PASSWORD:-aiops-local-dev-only}
     volumes:
       - ./backend:/app/backend
+      - ./scripts:/app/scripts
       - ./data:/app/data
       - aiops-data:/app/data/embeddings
     command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
