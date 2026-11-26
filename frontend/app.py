@@ -4,6 +4,7 @@ import sys
 import os
 import requests
 import json
+import html
 from pathlib import Path
 
 # Add backend to path
@@ -28,29 +29,90 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Product workspace theme
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        margin-bottom: 1rem;
+    :root {
+        --canvas: #f3f6f8;
+        --surface: #ffffff;
+        --ink: #1d2a35;
+        --muted: #697985;
+        --line: #dce5e8;
+        --teal: #087e78;
+        --blue: #2872b8;
+        --amber: #b66b12;
+        --red: #bd4f48;
+        --green: #31815d;
     }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
+    html, body, [data-testid="stAppViewContainer"] { background: var(--canvas); color: var(--ink); }
+    [data-testid="stHeader"] { background: rgba(243,246,248,.92); }
+    [data-testid="stToolbar"] { right: 1rem; }
+    .main .block-container { max-width: 1660px; padding: 1.45rem 2.2rem 3rem; }
+    [data-testid="stSidebar"] { background: #17262d; border-right: 1px solid #263941; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+    [data-testid="stSidebar"] * { color: #e7eff0; }
+    [data-testid="stSidebar"] hr { border-color: #34464c; margin: 1rem 0; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] > label { display: none; }
+    [data-testid="stSidebar"] [role="radiogroup"] { gap: .18rem; }
+    [data-testid="stSidebar"] [role="radiogroup"] label {
+        padding: .52rem .62rem; border-radius: 6px; transition: background .12s ease;
     }
-    .status-success {
-        color: #28a745;
-    }
-    .status-warning {
-        color: #ffc107;
-    }
-    .status-error {
-        color: #dc3545;
+    [data-testid="stSidebar"] [role="radiogroup"] label:hover { background: #243941; }
+    [data-testid="stSidebar"] [role="radiogroup"] label p { font-size: .91rem; }
+    .brand-lockup { display:flex; align-items:center; gap:.72rem; padding:.25rem .25rem .85rem; }
+    .brand-mark { width:2.4rem; height:2.4rem; display:grid; place-items:center; border-radius:6px; background:#0b7975; color:#fff; font-weight:750; font-size:.84rem; }
+    .brand-name { color:#f4f8f8; font-size:1.05rem; font-weight:680; line-height:1.15; }
+    .brand-subtitle { color:#9eb0b5; font-size:.74rem; margin-top:.18rem; }
+    .nav-caption { color:#91a4aa; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; font-weight:700; margin:.7rem .25rem .1rem; }
+    .workspace-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; border-bottom:1px solid var(--line); padding:.15rem 0 1.05rem; margin-bottom:1.2rem; }
+    .workspace-kicker { color:var(--teal); font-size:.69rem; font-weight:750; letter-spacing:.08em; text-transform:uppercase; margin-bottom:.28rem; }
+    .workspace-title { font-size:1.56rem; color:var(--ink); font-weight:720; line-height:1.18; }
+    .workspace-subtitle { color:var(--muted); font-size:.88rem; margin-top:.35rem; }
+    .workspace-context { text-align:right; color:var(--muted); font-size:.78rem; padding-top:.2rem; white-space:nowrap; }
+    .context-dot { display:inline-block; width:.48rem; height:.48rem; border-radius:50%; background:#3e9a70; margin-right:.4rem; }
+    .section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; margin:.45rem 0 .7rem; }
+    .section-heading h3 { font-size:1rem; font-weight:700; color:var(--ink); margin:0; }
+    .section-note { color:var(--muted); font-size:.77rem; }
+    .overview-status { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.78rem 1rem; border:1px solid #b9d9cc; border-left:4px solid var(--green); background:#edf7f1; border-radius:6px; margin:.1rem 0 1rem; }
+    .overview-status.partial { border-color:#ead3a5; border-left-color:var(--amber); background:#fff8e9; }
+    .overview-status.error { border-color:#e8c1be; border-left-color:var(--red); background:#fff1ef; }
+    .status-title { color:var(--ink); font-weight:700; font-size:.88rem; }
+    .status-detail { color:var(--muted); font-size:.78rem; margin-top:.15rem; }
+    .status-time { color:var(--muted); font-size:.74rem; white-space:nowrap; }
+    .node-card { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:.78rem .84rem; min-height:102px; }
+    .node-card-top { display:flex; align-items:center; justify-content:space-between; gap:.4rem; }
+    .node-name { color:var(--ink); font-weight:720; font-size:.91rem; }
+    .node-role { color:var(--muted); font-size:.72rem; margin-top:.28rem; }
+    .node-endpoint { color:#4d606c; font-size:.75rem; margin-top:.48rem; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .node-state { border-radius:999px; padding:.14rem .42rem; font-size:.68rem; font-weight:700; }
+    .node-state.online { background:#e7f4ec; color:#2c7954; }
+    .node-state.offline { background:#fae9e7; color:#a63e38; }
+    .node-state.unknown { background:#edf1f3; color:#687985; }
+    .finding-row { padding:.72rem 0; border-bottom:1px solid var(--line); }
+    .finding-row:last-child { border-bottom:0; }
+    .finding-top { display:flex; align-items:center; justify-content:space-between; gap:.6rem; }
+    .finding-name { color:var(--ink); font-size:.84rem; font-weight:680; }
+    .finding-severity { font-size:.67rem; font-weight:750; text-transform:uppercase; }
+    .finding-severity.high, .finding-severity.critical { color:var(--red); }
+    .finding-severity.medium { color:var(--amber); }
+    .finding-severity.low { color:var(--blue); }
+    .finding-description { color:var(--muted); font-size:.77rem; line-height:1.45; margin-top:.25rem; }
+    [data-testid="stMetric"] { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:.75rem .9rem; }
+    [data-testid="stMetricLabel"] { color:var(--muted); font-size:.77rem; }
+    [data-testid="stMetricValue"] { color:var(--ink); font-size:1.5rem; font-weight:720; }
+    [data-testid="stMetricDelta"] { font-size:.72rem; }
+    div.stButton > button { border-radius:6px; min-height:2.45rem; font-weight:650; }
+    div.stButton > button[kind="primary"] { background:#087e78; border-color:#087e78; color:#fff; }
+    div.stButton > button[kind="primary"]:hover { background:#066b66; border-color:#066b66; }
+    [data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+    [data-testid="stExpander"] { border-color:var(--line); border-radius:6px; }
+    [data-testid="stAlert"] { border-radius:6px; }
+    .main-header { display:none; }
+    @media (max-width: 900px) {
+        .main .block-container { padding:1rem 1rem 2rem; }
+        .workspace-header { flex-direction:column; }
+        .workspace-context { text-align:left; }
+        .node-card { min-height:88px; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -69,22 +131,29 @@ if 'llm_client' not in st.session_state:
         logger.error(f"Failed to initialize LLM client: {e}")
         st.session_state.llm_client = None
 
-# Sidebar
+# Sidebar navigation
 with st.sidebar:
-    st.markdown("# 🤖 OpenTenBase AIOps")
-    st.markdown("---")
-
-    # Navigation
-    page = st.radio(
-        "导航",
-        ["📊 健康监控", "🛡️ 只读巡检", "📜 巡检历史", "🧾 修复审批", "💬 智能问答", "🔍 性能诊断", "🧪 SQL 审核"],
-        label_visibility="collapsed"
+    st.markdown(
+        '<div class="brand-lockup"><div class="brand-mark">OTB</div>'
+        '<div><div class="brand-name">OpenTenBase</div>'
+        '<div class="brand-subtitle">智能运维工作台</div></div></div>',
+        unsafe_allow_html=True,
     )
-
-    st.markdown("---")
-
-    # Connection status
-    st.markdown("### 连接状态")
+    st.markdown('<div class="nav-caption">监控与诊断</div>', unsafe_allow_html=True)
+    navigation = {
+        "📊 集群总览": "📊 健康监控",
+        "🛡️ AI 巡检": "🛡️ 只读巡检",
+        "📜 巡检记录": "📜 巡检历史",
+        "🔍 性能诊断": "🔍 性能诊断",
+        "🧪 SQL 审核": "🧪 SQL 审核",
+        "💬 Agent 助手": "💬 智能问答",
+        "🧾 处置中心": "🧾 修复审批",
+    }
+    selected_navigation = st.radio(
+        "工作区", list(navigation), label_visibility="collapsed", key="navigation_page"
+    )
+    page = navigation[selected_navigation]
+    st.markdown('<div class="nav-caption">数据库连接</div>', unsafe_allow_html=True)
 
     if st.button("测试连接", use_container_width=True):
         with st.spinner("连接中..."):
@@ -99,15 +168,50 @@ with st.sidebar:
                 st.caption(f"错误: {status.get('error', 'unknown')}")
 
     st.markdown("---")
+    st.caption(f"{st.session_state.config.DB_HOST}:{st.session_state.config.DB_PORT}")
+    st.caption(f"{st.session_state.config.DB_NAME} · {st.session_state.config.DB_USER}")
+    st.caption(f"AI · {st.session_state.config.DEEPSEEK_MODEL}")
 
-    # System info
-    st.markdown("### 系统信息")
-    st.caption(f"**主机**: {st.session_state.config.DB_HOST}")
-    st.caption(f"**端口**: {st.session_state.config.DB_PORT}")
-    st.caption(f"**模型**: {st.session_state.config.DEEPSEEK_MODEL}")
 
-    st.markdown("---")
-    st.caption("OpenTenBase AIOps v0.1.0")
+PAGE_META = {
+    "📊 健康监控": ("集群总览", "拓扑、连接容量、复制链路与最近一次巡检结果"),
+    "🛡️ 只读巡检": ("AI 巡检", "采集 OpenTenBase 实时证据，生成可追溯的诊断记录"),
+    "📜 巡检历史": ("巡检记录", "查询历史审计、风险发现和诊断依据"),
+    "🧾 修复审批": ("处置中心", "复核待处理建议，查看执行状态与验证结果"),
+    "💬 智能问答": ("Agent 助手", "结合实时数据库工具与 OpenTenBase 知识库分析问题"),
+    "🔍 性能诊断": ("性能诊断", "检查锁等待、长查询与数据节点表统计"),
+    "🧪 SQL 审核": ("SQL 审核", "评估语句风险并查看只读执行计划"),
+}
+
+
+def navigate_to_page(page_name):
+    st.session_state["navigation_page"] = page_name
+
+
+def load_sql_template(query):
+    st.session_state["sql_review_editor"] = query
+
+
+def set_chat_prompt(prompt):
+    st.session_state["agent_chat_input"] = prompt
+
+
+page_title, page_subtitle = PAGE_META[page]
+header_left, header_right = st.columns([5, 2])
+with header_left:
+    st.markdown(
+        f'<div class="workspace-header"><div><div class="workspace-kicker">OPENTENBASE / AIOPS</div>'
+        f'<div class="workspace-title">{html.escape(page_title)}</div>'
+        f'<div class="workspace-subtitle">{html.escape(page_subtitle)}</div></div></div>',
+        unsafe_allow_html=True,
+    )
+with header_right:
+    st.markdown(
+        f'<div class="workspace-context"><span class="context-dot"></span>'
+        f'{html.escape(st.session_state.config.DB_HOST)}:{st.session_state.config.DB_PORT}'
+        f'<br>{html.escape(st.session_state.config.DB_NAME)}</div>',
+        unsafe_allow_html=True,
+    )
 
 def render_analysis_status(analysis):
     if not isinstance(analysis, dict):
@@ -345,122 +449,209 @@ def render_repair_proposal(api_base, audit_id, findings):
 
 # Main content
 if page == "📊 健康监控":
-    st.markdown('<div class="main-header">📊 集群健康监控</div>', unsafe_allow_html=True)
-
-    # Refresh button
-    col1, col2 = st.columns([6, 1])
-    with col2:
-        if st.button("🔄 刷新", use_container_width=True):
+    toolbar_left, toolbar_right = st.columns([5, 1])
+    with toolbar_right:
+        if st.button("刷新数据", use_container_width=True, key="overview-refresh"):
             st.rerun()
-
-    st.markdown("---")
-
-    # Collect data
     with st.spinner("正在采集数据..."):
         collector = ClusterCollector(st.session_state.db_connector)
         result = collector.collect()
 
     if result['status'] in {'success', 'partial'}:
         data = result['data']
-        if result['status'] == 'partial':
-            st.warning("集群状态仅部分可用，请检查下方节点连通性和采集错误。")
-            if result.get('errors'):
-                with st.expander("查看采集错误"):
-                    st.json(result['errors'])
-
-        # Overview metrics
-        st.markdown("### 总览")
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            node_count = len(data.get('nodes', []))
-            st.metric("集群节点", f"{node_count}", help="当前活跃的集群节点数")
-
-        with col2:
-            conn_info = data.get('connections', {})
-            conn_total = conn_info.get('total')
-            conn_max = conn_info.get('max_connections')
-            usage = conn_info.get('usage_percent')
-            st.metric(
-                "当前 CN 客户端连接",
-                f"{conn_total}/{conn_max} ({usage:.1f}%)" if usage is not None else "未知",
-            )
-
-        with col3:
-            repl_count = len(data.get('replication', []))
-            st.metric("复制连接", f"{repl_count}", help="主从复制连接数")
-
-        with col4:
-            is_replica = data.get('database_info', {}).get('is_replica', False)
-            role = "备库" if is_replica else "主库"
-            st.metric("节点角色", role)
-
-        st.markdown("---")
-
-        # Nodes information
-        st.markdown("### 集群节点")
         nodes = data.get('nodes', [])
-        if nodes:
-            st.dataframe(nodes, use_container_width=True, hide_index=True)
-        else:
-            st.info("暂无节点信息")
         connectivity = data.get('node_connectivity', [])
-        if connectivity:
-            st.markdown("#### 节点网络连通性")
-            st.dataframe(connectivity, use_container_width=True, hide_index=True)
-
-        # Connection details
-        st.markdown("### 连接详情")
-        connections = conn_info.get('by_database', [])
-        if connections:
-            st.dataframe(connections, use_container_width=True, hide_index=True)
-        else:
-            st.info("暂无连接信息")
-
-        # Replication status
-        st.markdown("### 复制状态")
+        connectivity_by_name = {item.get('node_name'): item for item in connectivity}
+        online_nodes = sum(item.get('status') == 'reachable' for item in connectivity)
+        unavailable_nodes = [
+            item for item in connectivity if item.get('status') == 'unreachable'
+        ]
+        conn_info = data.get('connections', {})
+        conn_total = conn_info.get('total')
+        conn_max = conn_info.get('max_connections')
+        usage = conn_info.get('usage_percent')
         replication = data.get('replication', [])
-        if replication:
-            st.dataframe(replication, use_container_width=True, hide_index=True)
+        automation = {}
+        latest_audit = None
+        latest_detail = {}
+        api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
+        try:
+            automation_response = requests.get(f"{api_base}/api/automation/status", timeout=8)
+            automation_response.raise_for_status()
+            automation = automation_response.json()
+            audit_response = requests.get(
+                f"{api_base}/api/audits",
+                params={"limit": 1, "audit_type": "readonly_health_audit"},
+                timeout=8,
+            )
+            audit_response.raise_for_status()
+            audits = audit_response.json().get("items", [])
+            if audits:
+                latest_audit = audits[0]
+                detail_response = requests.get(
+                    f"{api_base}/api/audits/{latest_audit['audit_id']}", timeout=8
+                )
+                detail_response.raise_for_status()
+                latest_detail = detail_response.json()
+        except requests.RequestException as error:
+            logger.warning("Could not load latest audit for overview: %s", error)
+
+        latest_evidence = latest_detail.get("evidence") or {}
+        latest_findings = latest_evidence.get("findings") or []
+        collection_status = latest_evidence.get("collection_status")
+        if unavailable_nodes or result['status'] == 'partial' or collection_status == 'partial':
+            status_class = "partial"
+            status_label = "需要关注"
+            status_detail = "部分节点不可达或最近一次巡检数据不完整"
+        elif result['status'] == 'error':
+            status_class = "error"
+            status_label = "采集异常"
+            status_detail = "无法完整读取集群状态"
         else:
-            st.info("暂无复制信息（可能是主库无从库，或当前查询的是从库）")
+            status_class = ""
+            status_label = "集群连接正常"
+            status_detail = f"{online_nodes}/{len(nodes)} 个注册节点网络可达"
+        last_audit_time = latest_audit.get("created_at") if latest_audit else None
+        st.markdown(
+            f'<div class="overview-status {status_class}"><div>'
+            f'<div class="status-title">{status_label}</div>'
+            f'<div class="status-detail">{status_detail}</div></div>'
+            f'<div class="status-time">最近巡检 · {html.escape(str(last_audit_time or "暂无记录"))}</div></div>',
+            unsafe_allow_html=True,
+        )
 
-        # AI Health Summary
-        st.markdown("---")
-        st.markdown("### 🤖 AI 健康评估")
+        node_count = len(nodes)
+        replication_count = len(replication)
+        finding_count = len(latest_findings)
+        metric_columns = st.columns(4)
+        metric_values = [
+            ("注册节点", f"{online_nodes}/{node_count}", "CN、DN 与 GTM 网络探测"),
+            ("CN 连接占用", f"{conn_total or 0}/{conn_max or '—'}", f"{usage:.1f}% 使用率" if usage is not None else "容量数据不可用"),
+            ("复制连接", str(replication_count), "当前 CN 可见的复制会话"),
+            ("最近巡检发现", str(finding_count), f"风险等级 · {latest_audit.get('risk_level', '未知') if latest_audit else '暂无记录'}"),
+        ]
+        for column, (label, value, detail) in zip(metric_columns, metric_values):
+            with column:
+                st.metric(label, value, help=detail)
 
-        if st.button("生成健康报告", use_container_width=True):
-            if st.session_state.llm_client:
-                with st.spinner("AI 正在分析..."):
-                    try:
-                        perf_collector = PerformanceCollector(
-                            st.session_state.db_connector,
-                            st.session_state.config
+        if usage is not None:
+            progress_value = min(max(float(usage) / 100, 0), 1)
+            st.progress(progress_value, text=f"CN 客户端连接容量 · {usage:.1f}%")
+
+        st.markdown(
+            '<div class="section-heading"><h3>集群拓扑</h3>'
+            f'<span class="section-note">{len(nodes)} 个注册节点 · CN 连接入口 {html.escape(str(st.session_state.config.DB_HOST))}:{st.session_state.config.DB_PORT}</span></div>',
+            unsafe_allow_html=True,
+        )
+        if nodes:
+            node_columns = st.columns(min(len(nodes), 4))
+            role_names = {"C": "协调节点 · CN", "D": "数据节点 · DN", "G": "事务管理器 · GTM"}
+            for index, node in enumerate(nodes):
+                probe = connectivity_by_name.get(node.get("node_name"), {})
+                node_status = probe.get("status", "unknown")
+                status_label = {"reachable": "可达", "unreachable": "不可达", "unknown": "未知"}.get(node_status, "未知")
+                status_class_name = {"reachable": "online", "unreachable": "offline", "unknown": "unknown"}.get(node_status, "unknown")
+                node_name = html.escape(str(node.get("node_name", "未命名")))
+                host = html.escape(str(node.get("node_host", "未知")))
+                port = html.escape(str(node.get("node_port", "—")))
+                role = role_names.get(node.get("node_type"), "数据库节点")
+                with node_columns[index % len(node_columns)]:
+                    st.markdown(
+                        f'<div class="node-card"><div class="node-card-top">'
+                        f'<span class="node-name">{node_name}</span>'
+                        f'<span class="node-state {status_class_name}">{status_label}</span></div>'
+                        f'<div class="node-role">{role}</div>'
+                        f'<div class="node-endpoint">{host}:{port}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.info("未发现注册节点")
+
+        left_column, right_column = st.columns([1.25, 1])
+        with left_column:
+            st.markdown(
+                '<div class="section-heading"><h3>最近巡检信号</h3>'
+                '<span class="section-note">来自最近一次持久化审计</span></div>',
+                unsafe_allow_html=True,
+            )
+            if latest_audit:
+                diagnosis = (latest_detail.get("ai_analysis") or {}).get("structured") or {}
+                if diagnosis.get("root_cause"):
+                    st.markdown(f"**AI 判断**  \n{diagnosis['root_cause']}")
+                if latest_findings:
+                    for finding in latest_findings[:5]:
+                        severity = html.escape(str(finding.get("severity", "unknown")).lower())
+                        check = html.escape(str(finding.get("check", "巡检发现")))
+                        observed = html.escape(str(finding.get("observed", "")))
+                        st.markdown(
+                            f'<div class="finding-row"><div class="finding-top">'
+                            f'<span class="finding-name">{check}</span>'
+                            f'<span class="finding-severity {severity}">{severity}</span></div>'
+                            f'<div class="finding-description">{observed}</div></div>',
+                            unsafe_allow_html=True,
                         )
-                        perf_data = perf_collector.collect().get('data', {})
-
-                        summary = st.session_state.llm_client.generate_health_summary(
-                            cluster_data=data,
-                            performance_data=perf_data
-                        )
-                        st.markdown(summary)
-                    except Exception as e:
-                        st.error(f"生成报告失败: {e}")
+                else:
+                    st.success("最近一次巡检没有规则告警")
             else:
-                st.warning("LLM 客户端未初始化，请检查 API 配置")
+                st.info("还没有健康巡检记录。运行一次 AI 巡检后，发现和诊断会显示在这里。")
+        with right_column:
+            st.markdown(
+                '<div class="section-heading"><h3>值班操作</h3>'
+                '<span class="section-note">按需启动诊断或复核</span></div>',
+                unsafe_allow_html=True,
+            )
+            action_left, action_right = st.columns(2)
+            with action_left:
+                st.button(
+                    "运行 AI 巡检", type="primary", use_container_width=True,
+                    key="overview-run-audit", on_click=navigate_to_page,
+                    args=("🛡️ AI 巡检",),
+                )
+            with action_right:
+                st.button(
+                    "打开 Agent", use_container_width=True, key="overview-open-agent",
+                    on_click=navigate_to_page, args=("💬 Agent 助手",),
+                )
+            if latest_audit:
+                st.caption(
+                    f"审计 ID · {latest_audit['audit_id']}  ·  "
+                    f"采集状态 · {collection_status or '未知'}  ·  "
+                    f"巡检周期 · {automation.get('interval_seconds', '—')} 秒"
+                )
+            if unavailable_nodes:
+                st.error("不可达节点: " + ", ".join(item.get("node_name", "未知") for item in unavailable_nodes))
+
+        bottom_left, bottom_right = st.columns([1, 1])
+        with bottom_left:
+            st.markdown('<div class="section-heading"><h3>复制链路</h3></div>', unsafe_allow_html=True)
+            if replication:
+                st.dataframe(replication, use_container_width=True, hide_index=True)
+            else:
+                st.caption("当前 CN 未报告复制会话。")
+        with bottom_right:
+            st.markdown('<div class="section-heading"><h3>连接分布</h3></div>', unsafe_allow_html=True)
+            connections = conn_info.get('by_database', [])
+            if connections:
+                st.dataframe(connections, use_container_width=True, hide_index=True)
+            else:
+                st.caption("当前没有可展示的客户端连接记录。")
 
     else:
         st.error(f"数据采集失败: {result.get('error', 'unknown')}")
 
 elif page == "🛡️ 只读巡检":
-    st.markdown('<div class="main-header">🛡️ AI 只读健康巡检</div>', unsafe_allow_html=True)
-    st.caption("只采集数据库状态并生成诊断，不执行终止会话、修改参数或其他写操作。")
     api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
     try:
         automation = requests.get(f"{api_base}/api/automation/status", timeout=10).json()
-        mode = "已启用" if automation["automatic_health_audit_enabled"] else "已关闭"
-        st.caption(f"周期巡检{mode} · 间隔 {automation['interval_seconds']} 秒")
         repair_readiness = automation.get("repair_readiness") or {}
+        status_columns = st.columns(3)
+        with status_columns[0]:
+            st.metric("周期巡检", "运行中" if automation.get("automatic_health_audit_enabled") else "已关闭",
+                      help=f"间隔 {automation.get('interval_seconds', '—')} 秒")
+        with status_columns[1]:
+            st.metric("自动修复", "已启用" if automation.get("automatic_repair_enabled") else "未启用")
+        with status_columns[2]:
+            st.metric("修复执行器", "就绪" if repair_readiness.get("ready") else "未就绪")
         if not repair_readiness.get("executor_ready"):
             st.warning(
                 "修复执行账号或数据库函数未就绪。系统会生成审计和建议，但不会执行数据库修复。"
@@ -479,8 +670,20 @@ elif page == "🛡️ 只读巡检":
                 )
     except Exception as error:
         st.warning(f"读取周期巡检状态失败: {error}")
-    statistics_target = st.text_input("目标表（可选）", placeholder="public.orders").strip()
-    if st.button("运行只读巡检", type="primary"):
+
+    with st.container(border=True):
+        st.markdown("#### 启动一次巡检")
+        target_column, run_column = st.columns([3, 1])
+        with target_column:
+            statistics_target = st.text_input(
+                "统计目标表（留空执行全库巡检）",
+                placeholder="public.orders",
+                key="health-audit-target",
+            ).strip()
+        with run_column:
+            st.write("")
+            run_audit = st.button("运行 AI 巡检", type="primary", use_container_width=True)
+    if run_audit:
         st.session_state.pop("last_health_audit", None)
         with st.status("正在启动巡检") as status:
             try:
@@ -526,44 +729,59 @@ elif page == "🛡️ 只读巡检":
         if retried_analysis:
             audit.update(retried_analysis)
             st.session_state.last_health_audit = audit
-        st.metric("风险等级", audit["risk_level"])
         evidence = audit.get("evidence") or {}
         render_collection_status(evidence)
         render_automatic_repair(evidence)
         render_analysis_status(audit)
-        st.caption(f"审计 ID: {audit['audit_id']}")
         findings = audit.get("findings", [])
-        if findings:
-            rows = [
-                {**finding, "evidence": json.dumps(finding.get("evidence"), ensure_ascii=False)}
-                for finding in findings
-            ]
-            st.dataframe(rows, use_container_width=True, hide_index=True)
-            render_repair_proposal(api_base, audit["audit_id"], findings)
-        elif evidence.get("collection_status") == "success":
-            st.success("未发现规则告警")
         structured = audit.get("structured") or {}
-        if structured.get("root_cause"):
-            st.markdown("### AI 判断")
-            st.write(structured["root_cause"])
-        recommendations = structured.get("recommendations") or []
-        if recommendations:
-            st.markdown("### 只读复核建议")
-            for recommendation in recommendations:
-                st.markdown(f"- {recommendation}")
-        with st.expander("查看现场证据"):
+        summary_tab, findings_tab, evidence_tab = st.tabs(["诊断结论", f"发现 · {len(findings)}", "证据与引用"])
+        with summary_tab:
+            summary_columns = st.columns([1, 3])
+            with summary_columns[0]:
+                st.metric("风险等级", str(audit.get("risk_level", "unknown")).upper())
+                st.caption(f"审计 ID · {audit['audit_id']}")
+            with summary_columns[1]:
+                st.markdown("#### 根因分析")
+                st.write(structured.get("root_cause") or "模型没有返回根因判断，请结合证据复核。")
+                recommendations = structured.get("recommendations") or []
+                if recommendations:
+                    st.markdown("#### 下一步建议")
+                    for recommendation in recommendations:
+                        st.markdown(f"- {recommendation}")
+        with findings_tab:
+            if findings:
+                for index, finding in enumerate(findings):
+                    severity = str(finding.get("severity", "unknown")).upper()
+                    title = f"{severity} · {finding.get('check', '巡检发现')} · {finding.get('observed', '')}"
+                    with st.expander(title, expanded=index == 0):
+                        st.json(finding.get("evidence", {}))
+                render_repair_proposal(api_base, audit["audit_id"], findings)
+            elif evidence.get("collection_status") == "success":
+                st.success("未发现规则告警")
+            else:
+                st.info("当前审计未产生规则发现，请结合采集状态查看是否存在数据缺口。")
+        with evidence_tab:
+            st.markdown("#### 本次采集证据")
             st.json(audit.get("evidence", {}))
-        with st.expander("查看知识引用"):
-            st.dataframe(audit.get("knowledge_refs", []), use_container_width=True, hide_index=True)
+            refs = audit.get("knowledge_refs", [])
+            st.markdown(f"#### 知识引用 · {len(refs)}")
+            if refs:
+                st.dataframe(refs, use_container_width=True, hide_index=True)
+            else:
+                st.caption("本次分析没有返回知识库引用。")
 
 elif page == "📜 巡检历史":
-    st.markdown('<div class="main-header">📜 巡检历史</div>', unsafe_allow_html=True)
     api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
     try:
         risks = {"全部": None, "高与严重": "high_or_critical", "仅严重": "critical"}
-        risk = risks[st.selectbox("风险等级筛选", list(risks))]
-        table_filter = st.text_input("目标表筛选", placeholder="public.orders").strip()
-        database_filter = st.text_input("数据库筛选", placeholder="postgres").strip()
+        filter_columns = st.columns([1, 1, 1])
+        with filter_columns[0]:
+            risk = risks[st.selectbox("风险等级", list(risks))]
+        with filter_columns[1]:
+            table_filter = st.text_input("目标表", placeholder="public.orders").strip()
+        with filter_columns[2]:
+            database_filter = st.text_input("数据库", placeholder="postgres").strip()
         response = requests.get(
             f"{api_base}/api/audits",
             params={
@@ -576,13 +794,33 @@ elif page == "📜 巡检历史":
         history = response.json()
         items = history.get("items", [])
         if items:
-            st.dataframe(items, use_container_width=True, hide_index=True)
+            high_count = sum(item.get("risk_level") in {"high", "critical"} for item in items)
+            partial_count = sum(item.get("collection_status") == "partial" for item in items)
+            summary_columns = st.columns(3)
+            summary_columns[0].metric("记录数", len(items))
+            summary_columns[1].metric("高风险", high_count)
+            summary_columns[2].metric("部分采集", partial_count)
+            type_labels = {
+                "readonly_health_audit": "健康巡检",
+                "readonly_lock_audit": "锁诊断",
+            }
+            rows = [{
+                "时间": item.get("created_at"),
+                "数据库": item.get("database") or "—",
+                "类型": type_labels.get(item.get("audit_type"), item.get("audit_type")),
+                "风险": str(item.get("risk_level") or "unknown").upper(),
+                "采集": {"success": "完整", "partial": "部分", "error": "失败"}.get(item.get("collection_status"), "—"),
+                "发现": item.get("finding_count", 0),
+                "引用": item.get("reference_count", 0),
+                "触发": {"scheduled": "周期", "manual": "手动", "alertmanager": "告警"}.get(item.get("trigger"), "—"),
+            } for item in items]
+            st.dataframe(rows, use_container_width=True, hide_index=True)
             audit_options = {
-                f"{item.get('database') or '未知数据库'} · {item['audit_type']} · "
-                f"{item['created_at']} · {item['audit_id']}": item["audit_id"]
+                f"{item.get('created_at')} · {type_labels.get(item.get('audit_type'), item.get('audit_type'))} · "
+                f"{str(item.get('risk_level') or 'unknown').upper()} · {item.get('audit_id')}": item["audit_id"]
                 for item in items
             }
-            selected_id = audit_options[st.selectbox("查看审计详情", list(audit_options))]
+            selected_id = audit_options[st.selectbox("审计详情", list(audit_options))]
             if selected_id:
                 response = requests.get(f"{api_base}/api/audits/{selected_id}", timeout=10)
                 response.raise_for_status()
@@ -598,23 +836,35 @@ elif page == "📜 巡检历史":
                 if retried_analysis:
                     analysis = retried_analysis
                 render_analysis_status(analysis)
-                st.json(analysis)
-                with st.expander("查看现场证据"):
+                analysis_structured = analysis.get("structured") or {}
+                diagnosis_tab, evidence_tab, knowledge_tab = st.tabs(["分析", "采集证据", "知识引用"])
+                with diagnosis_tab:
+                    st.markdown("#### 根因分析")
+                    st.write(analysis_structured.get("root_cause") or "暂无根因判断")
+                    for recommendation in analysis_structured.get("recommendations") or []:
+                        st.markdown(f"- {recommendation}")
+                with evidence_tab:
                     st.json(detail.get("evidence", {}))
-                with st.expander("查看知识引用"):
-                    st.json(detail.get("knowledge_refs") or [])
+                with knowledge_tab:
+                    refs = detail.get("knowledge_refs") or []
+                    if refs:
+                        st.dataframe(refs, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("没有知识库引用")
         else:
             st.info("暂无符合筛选条件的巡检记录")
     except Exception as error:
         st.error(f"读取巡检历史失败: {error}")
 
 elif page == "🧾 修复审批":
-    st.markdown('<div class="main-header">🧾 修复审批</div>', unsafe_allow_html=True)
     api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
     try:
         queues = {"待审批": "pending", "待复核": "review", "全部记录": None}
-        queue = queues[st.selectbox("请求范围", list(queues))]
-        page_number = st.number_input("页码", min_value=1, step=1, key=f"repair-page-{queue}")
+        queue_column, page_column = st.columns([3, 1])
+        with queue_column:
+            queue = queues[st.selectbox("请求队列", list(queues))]
+        with page_column:
+            page_number = st.number_input("页码", min_value=1, step=1, key=f"repair-page-{queue}")
         response = requests.get(
             f"{api_base}/api/repairs",
             params={"limit": 50, "offset": (page_number - 1) * 50, "queue": queue},
@@ -627,8 +877,29 @@ elif page == "🧾 修复审批":
         items = response.json().get("items", [])
         if not items:
             st.info("暂无修复请求")
+        else:
+            counts = st.columns(4)
+            status_counts = {
+                "pending": sum(item.get("status") == "pending" for item in items),
+                "executing": sum(item.get("status") == "executing" for item in items),
+                "unverified": sum(item.get("status") == "unverified" for item in items),
+                "failed": sum(item.get("status") == "failed" for item in items),
+            }
+            for column, (name, label) in zip(counts, [
+                ("pending", "待审批"), ("executing", "执行中"),
+                ("unverified", "待复核"), ("failed", "执行失败"),
+            ]):
+                column.metric(label, status_counts[name])
+        status_labels = {
+            "pending": "待审批", "executing": "执行中", "unverified": "待复核",
+            "executed": "已验证", "failed": "执行失败", "rejected": "已拒绝",
+            "closed": "已关闭", "expired": "已过期",
+        }
+        operation_labels = {"analyze_table": "刷新表统计 ANALYZE", "cancel_query": "取消查询建议"}
         for item in items:
-            with st.expander(f"{item['status']} · {item['operation']} · {item['request_id']}"):
+            status_label = status_labels.get(item.get("status"), item.get("status"))
+            operation_label = operation_labels.get(item.get("operation"), item.get("operation"))
+            with st.expander(f"{status_label} · {operation_label} · {item['request_id']}"):
                 proposal_evidence = item.get("evidence") or {}
                 risk_policy = proposal_evidence.get("risk_policy") or {}
                 human_approval = proposal_evidence.get("human_approval") or {}
@@ -750,27 +1021,37 @@ elif page == "🧾 修复审批":
         st.error(f"读取修复审批失败: {error}")
 
 elif page == "💬 智能问答":
-    st.markdown('<div class="main-header">💬 智能问答助手</div>', unsafe_allow_html=True)
-    st.markdown("向 AI 助手提问关于 OpenTenBase 的问题")
-    st.markdown("---")
-
-    # Initialize chat history
     if 'messages' not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat history
+    if not st.session_state.messages:
+        st.markdown("#### 开始一次运维调查")
+        st.caption("描述异常或目标，Agent 会按需检查集群、查询知识库并执行你明确提出的 SQL。")
+        prompt_suggestions = [
+            "检查当前集群状态并指出最需要关注的问题",
+            "分析最近一次巡检的主要发现和证据",
+            "查看当前数据节点锁等待与阻塞会话",
+        ]
+        suggestion_columns = st.columns(len(prompt_suggestions))
+        for column, suggestion in zip(suggestion_columns, prompt_suggestions):
+            with column:
+                st.button(
+                    suggestion, use_container_width=True, key=f"agent-suggestion-{suggestion[:8]}",
+                    on_click=set_chat_prompt, args=(suggestion,),
+                )
+
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            if message.get("tool_trace"):
+                with st.expander("工具调用与执行记录"):
+                    st.json(message["tool_trace"])
 
-    # Chat input
-    if prompt := st.chat_input("输入您的问题..."):
-        # Add user message
+    if prompt := st.chat_input("描述数据库问题，或输入要检查的 SQL…", key="agent_chat_input"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Generate response
         with st.chat_message("assistant"):
             if st.session_state.llm_client:
                 with st.spinner("思考中..."):
@@ -791,12 +1072,10 @@ elif page == "💬 智能问答":
                         answer = result.get("answer", "")
                         st.markdown(answer)
                         trace = result.get("tool_trace") or []
-                        if trace:
-                            with st.expander("本轮工具调用与 SQL 执行"):
-                                st.json(trace)
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": answer
+                            "content": answer,
+                            "tool_trace": trace,
                         })
                     except Exception as e:
                         error_msg = f"抱歉，处理您的问题时出错了: {str(e)}"
@@ -813,35 +1092,51 @@ elif page == "💬 智能问答":
                     "content": error_msg
                 })
 
-    # Clear chat button
     if st.session_state.messages:
-        if st.button("清空对话", use_container_width=True):
+        if st.button("清空当前会话", key="clear-agent-chat"):
             st.session_state.messages = []
             st.rerun()
 
 elif page == "🧪 SQL 审核":
-    st.markdown('<div class="main-header">🧪 SQL 风险审核</div>', unsafe_allow_html=True)
-    st.caption("审核仅识别风险并运行只读 EXPLAIN，不会执行提交、修改或删除操作。")
-    sql_text = st.text_area("SQL", height=180, placeholder="SELECT ...")
-    explain = st.checkbox("运行只读 EXPLAIN", value=True)
-    if st.button("开始审核", type="primary", disabled=not sql_text.strip()):
+    st.markdown("SQL 审核只评估语句风险；勾选 EXPLAIN 时，仅生成只读执行计划。")
+    examples = {
+        "选择一个查询模板…": "",
+        "查看当前连接": "SELECT datname, state, count(*) AS sessions FROM pg_catalog.pg_stat_activity GROUP BY datname, state ORDER BY sessions DESC;",
+        "查看活动会话": "SELECT pid, usename, datname, application_name, state, wait_event_type, wait_event FROM pg_catalog.pg_stat_activity WHERE backend_type = 'client backend' ORDER BY state, pid;",
+        "查看表统计": "SELECT schemaname, relname, n_live_tup, n_dead_tup FROM pg_catalog.pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 20;",
+    }
+    template_column, explain_column = st.columns([3, 1])
+    with template_column:
+        selected_example = st.selectbox("查询模板", list(examples), label_visibility="collapsed")
+    with explain_column:
+        explain = st.toggle("只读 EXPLAIN", value=True)
+    if selected_example != "查询模板…":
+        st.button(
+            "载入模板", key="load-sql-template", on_click=load_sql_template,
+            args=(examples[selected_example],),
+        )
+    sql_text = st.text_area(
+        "SQL 语句", height=230, placeholder="SELECT ...", key="sql_review_editor"
+    )
+    audit_column, clear_column = st.columns([1, 5])
+    with audit_column:
+        run_sql_review = st.button("审核 SQL", type="primary", disabled=not sql_text.strip())
+    if run_sql_review:
         api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
         try:
             response = requests.post(f"{api_base}/api/sql-audit", json={"sql": sql_text, "explain": explain}, timeout=15)
             response.raise_for_status()
             report = response.json()
             level = report.get("risk_level", "unknown")
-            if level in {"critical", "high"}:
-                st.error(f"风险等级：{level}")
-            elif level == "medium":
-                st.warning("风险等级：medium")
-            else:
-                st.success("风险等级：low")
+            risk_label = {"critical": "严重", "high": "高", "medium": "中", "low": "低"}.get(level, "未知")
+            st.metric("语句风险", risk_label)
             if report.get("findings"):
+                st.markdown("#### 风险发现")
                 st.dataframe(report["findings"], use_container_width=True, hide_index=True)
             if report.get("explain_error"):
                 st.warning(report["explain_error"].get("message", "EXPLAIN 失败"))
             elif report.get("explain") is not None:
+                st.markdown("#### 执行计划")
                 st.json(report["explain"])
         except Exception as error:
             st.error(f"SQL 审核失败：{error}")
