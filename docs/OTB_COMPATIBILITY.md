@@ -146,6 +146,8 @@ API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 
 
 另以 3 个并发 worker 同时执行只读全量采集，3/3 为 `success` 且无采集错误，总墙钟时间 650.28 ms，各 collector 耗时为 258.02–649.21 ms。该小规模并发探测用于检查基本并发兼容，不替代具有代表性的业务并发、数据规模和持续时间测试。
 
+可用 `docker compose exec -T aiops-api python -m scripts.benchmark_health_collection --runs 10 --concurrency 3` 重复执行串行与并发采集测量。2026-11-27 的 5 次串行样本为 5/5 成功，中位数 175.20 ms、P95 340.04 ms；3 路并发样本为 3/3 成功，墙钟 229.57 ms、零错误。该脚本只读目标数据库，直接脚本入口 `python scripts/benchmark_health_collection.py` 也已验证。
+
 ### 2026-11-26 周期巡检续跑与 AI 阶段耗时
 
 API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度器在上一条 scheduled 记录超过去重窗口后自然生成新记录 `78666cb2-149f-4470-bdf1-5adffec81f77`，采集状态为 `success`，没有 fallback，Prometheus 周期时间戳随之更新。该轮 collector 耗时为 330.79 ms。
