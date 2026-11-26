@@ -26,6 +26,7 @@ from .utils.operations_store import OperationsStore
 from .utils.operational_memory import OperationalMemory
 from .utils.audit_status import normalize_audit_record
 from .utils.readiness import build_readiness
+from .utils.latency_metrics import scheduled_analysis_latency_metrics
 from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
@@ -590,6 +591,11 @@ def get_automation_status():
             latest_scheduled_at = None
             latest_scheduled_collection_status = None
             scheduled_targets = []
+            scheduled_analysis_latency = {
+                "sample_count": 0,
+                "p50_ms": 0.0,
+                "p95_ms": 0.0,
+            }
             repair_review_count = 0
             cursor.execute("SELECT to_regclass('repair_requests') AS repair_table")
             if cursor.fetchone()["repair_table"] is not None:
@@ -638,6 +644,27 @@ def get_automation_status():
                     (list(config.AIOPS_AUTO_AUDIT_TARGETS), Json(config.audit_target)),
                 )
                 scheduled_targets = [dict(row) for row in cursor.fetchall()]
+                cursor.execute("""
+                    SELECT count(*) AS sample_count,
+                           percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50_ms,
+                           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms
+                    FROM (
+                        SELECT (evidence->>'analysis_duration_ms')::double precision AS duration_ms
+                        FROM audit_records
+                        WHERE audit_type='readonly_health_audit'
+                          AND evidence->>'trigger'='scheduled'
+                          AND evidence->'audit_target'=%s::jsonb
+                          AND evidence->>'analysis_duration_ms' ~ '^[0-9]+([.][0-9]+)?$'
+                        ORDER BY created_at DESC, audit_id DESC
+                        LIMIT 20
+                    ) AS recent_scheduled_audits
+                """, (Json(config.audit_target),))
+                latency = cursor.fetchone()
+                scheduled_analysis_latency = {
+                    "sample_count": latency["sample_count"] or 0,
+                    "p50_ms": float(latency["p50_ms"] or 0),
+                    "p95_ms": float(latency["p95_ms"] or 0),
+                }
                 if scheduled_targets and all(row["created_at"] for row in scheduled_targets):
                     latest_scheduled_at = min(row["created_at"] for row in scheduled_targets)
                 statuses = {row["collection_status"] for row in scheduled_targets}
@@ -680,6 +707,7 @@ def get_automation_status():
             "latest_scheduled_at": latest_scheduled_at,
             "latest_scheduled_collection_status": latest_scheduled_collection_status,
             "scheduled_targets": scheduled_targets,
+            "scheduled_analysis_latency": scheduled_analysis_latency,
             "scheduler_runtime": health_audit_scheduler.runtime_status(),
             "repair_review_count": repair_review_count,
         }
@@ -768,6 +796,7 @@ def audit_metrics():
         f"aiops_health_audit_latest_analysis_duration_ms {float(latest['analysis_duration_ms']) if latest and latest.get('analysis_duration_ms') else 0}",
         "# TYPE aiops_health_audit_latest_risk gauge",
     ]
+    metrics.extend(scheduled_analysis_latency_metrics(status["scheduled_analysis_latency"]))
     metrics.extend(
         f'aiops_health_audit_latest_risk{{level="{level}"}} {int(risk == level)}'
         for level in levels
