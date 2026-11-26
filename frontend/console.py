@@ -6,6 +6,7 @@ audits, evidence, SQL review, repair review, and the interactive Agent.
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 import requests
@@ -102,6 +103,7 @@ def go(page):
 st.session_state.setdefault("page", "overview")
 st.session_state.setdefault("agent_sessions", {})
 st.session_state.setdefault("active_agent_session", None)
+st.session_state.setdefault("agent_sessions_loaded", False)
 with st.sidebar:
     st.markdown('<div class="brand"><div class="brand-mark">OTB</div><div><div class="brand-name">OpenTenBase</div><div class="brand-sub">AIOps 运维控制台</div></div></div>', unsafe_allow_html=True)
     st.markdown('<div class="nav-label">监控与诊断</div>', unsafe_allow_html=True)
@@ -312,8 +314,19 @@ elif st.session_state.page == "repairs":
 
 elif st.session_state.page == "agent":
     sessions = st.session_state.agent_sessions
+    if not st.session_state.agent_sessions_loaded:
+        try:
+            persisted = api_json("/api/agent/sessions", timeout=15).get("items", [])
+            for item in persisted:
+                sessions[item["session_id"]] = {
+                    "title": item.get("title") or "新会话",
+                    "messages": item.get("messages") or [],
+                }
+        except requests.RequestException:
+            pass
+        st.session_state.agent_sessions_loaded = True
     if not sessions:
-        session_id = "session-1"
+        session_id = str(uuid.uuid4())
         sessions[session_id] = {"title": "新会话", "messages": []}
         st.session_state.active_agent_session = session_id
     if st.session_state.active_agent_session not in sessions:
@@ -334,14 +347,22 @@ elif st.session_state.page == "agent":
             st.rerun()
     with session_toolbar[1]:
         if st.button("新建会话", use_container_width=True, key="new-agent-session"):
-            new_id = f"session-{len(sessions) + 1}"
+            new_id = str(uuid.uuid4())
             sessions[new_id] = {"title": "新会话", "messages": []}
             st.session_state.active_agent_session = new_id
+            try:
+                requests.put(f"{API}/api/agent/sessions/{new_id}", json={"session_id": new_id, **sessions[new_id]}, timeout=15)
+            except requests.RequestException:
+                pass
             st.rerun()
     with session_toolbar[2]:
         if st.button("删除当前", use_container_width=True, key="delete-agent-session") and len(sessions) > 1:
             del sessions[session_id]
             st.session_state.active_agent_session = next(iter(sessions))
+            try:
+                requests.delete(f"{API}/api/agent/sessions/{session_id}", timeout=15)
+            except requests.RequestException:
+                pass
             st.rerun()
 
     active_messages = active_session["messages"]
@@ -358,16 +379,51 @@ elif st.session_state.page == "agent":
         active_messages.append({"role": "user", "content": prompt})
         if active_session["title"] == "新会话":
             active_session["title"] = prompt[:24] + ("…" if len(prompt) > 24 else "")
+        try:
+            requests.put(
+                f"{API}/api/agent/sessions/{session_id}",
+                json={"session_id": session_id, "title": active_session["title"], "messages": active_messages},
+                timeout=15,
+            ).raise_for_status()
+        except requests.RequestException:
+            pass
         with st.chat_message("user"):
             st.markdown(prompt)
         try:
             history = [{"role": m["role"], "content": m["content"]} for m in active_messages[:-1]]
-            response = requests.post(f"{API}/api/qa/ask", json={"question": prompt, "history": history}, timeout=900)
-            response.raise_for_status()
-            result = response.json()
+            progress = st.empty()
+            events = []
+            result = None
+            with requests.post(f"{API}/api/qa/ask/stream", json={"question": prompt, "history": history}, stream=True, timeout=900) as response:
+                response.raise_for_status()
+                for raw_line in response.iter_lines(chunk_size=1):
+                    if not raw_line or not raw_line.startswith(b"data:"):
+                        continue
+                    event = json.loads(raw_line[5:])
+                    events.append(event)
+                    if event.get("type") == "progress":
+                        progress.info(event.get("message", "Agent 正在处理"))
+                    elif event.get("type") == "tool":
+                        progress.info(f"正在调用 {event.get('tool', '数据库工具')} · 第 {event.get('round', 0)} 轮")
+                    elif event.get("type") == "error":
+                        raise RuntimeError(event.get("message", "Agent 请求失败"))
+                    elif event.get("type") == "result":
+                        result = event
+                        break
+            progress.empty()
+            if result is None:
+                raise RuntimeError("Agent 流在返回结果前中断")
             with st.chat_message("assistant"):
                 st.markdown(result.get("answer", ""))
             active_messages.append({"role": "assistant", "content": result.get("answer", ""), "trace": result.get("tool_trace")})
+            try:
+                requests.put(
+                    f"{API}/api/agent/sessions/{session_id}",
+                    json={"session_id": session_id, "title": active_session["title"], "messages": active_messages},
+                    timeout=15,
+                ).raise_for_status()
+            except requests.RequestException as error:
+                st.warning(f"回复已生成，但会话保存失败：{error}")
             st.rerun()
         except Exception as error:
             st.error(str(error))

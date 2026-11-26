@@ -1,6 +1,7 @@
 """FastAPI application (optional REST API)"""
 import asyncio
 import json
+import uuid
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, HTTPException, Query
@@ -80,6 +81,66 @@ class QuestionRequest(BaseModel):
     question: str
     include_context: bool = True
     history: list[dict[str, str]] = Field(default_factory=list)
+
+
+class AgentSessionRequest(BaseModel):
+    session_id: str
+    title: str = "新会话"
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _ensure_agent_sessions(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agent_sessions(
+            session_id text PRIMARY KEY,
+            title text NOT NULL,
+            messages jsonb NOT NULL DEFAULT '[]'::jsonb,
+            updated_at timestamptz NOT NULL DEFAULT now()
+        )
+    """)
+
+
+@app.get("/api/agent/sessions")
+def list_agent_sessions():
+    store = OperationsStore()
+    try:
+        with store.conn, store.conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            _ensure_agent_sessions(cursor)
+            cursor.execute("SELECT session_id,title,messages,updated_at FROM agent_sessions ORDER BY updated_at DESC")
+            return {"items": [dict(row) for row in cursor.fetchall()]}
+    finally:
+        store.close()
+
+
+@app.put("/api/agent/sessions/{session_id}")
+def save_agent_session(session_id: str, request: AgentSessionRequest):
+    if session_id != request.session_id:
+        raise HTTPException(status_code=400, detail="Session ID mismatch")
+    store = OperationsStore()
+    try:
+        with store.conn, store.conn.cursor() as cursor:
+            _ensure_agent_sessions(cursor)
+            cursor.execute("""
+                INSERT INTO agent_sessions(session_id,title,messages,updated_at)
+                VALUES(%s,%s,%s,now())
+                ON CONFLICT(session_id) DO UPDATE SET title=EXCLUDED.title,
+                    messages=EXCLUDED.messages, updated_at=now()
+            """, (session_id, request.title, Json(request.messages)))
+        return {"session_id": session_id, "saved": True}
+    finally:
+        store.close()
+
+
+@app.delete("/api/agent/sessions/{session_id}")
+def delete_agent_session(session_id: str):
+    store = OperationsStore()
+    try:
+        with store.conn, store.conn.cursor() as cursor:
+            _ensure_agent_sessions(cursor)
+            cursor.execute("DELETE FROM agent_sessions WHERE session_id=%s", (session_id,))
+        return {"session_id": session_id, "deleted": True}
+    finally:
+        store.close()
 
 
 class DiagnosisRequest(BaseModel):
@@ -187,6 +248,56 @@ async def ask_question(request: QuestionRequest):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         agent.client.close()
+
+
+@app.post("/api/qa/ask/stream")
+async def stream_question(request: QuestionRequest):
+    """Run the live Agent while keeping the UI informed over SSE."""
+    events = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    async def run_agent():
+        agent = AIOpsAgent(config)
+        try:
+            await events.put({"type": "progress", "stage": "thinking", "message": "Agent 正在理解问题"})
+            result = await asyncio.to_thread(
+                lambda: asyncio.run(agent.chat(request.question, request.history))
+            )
+            trace = result.get("tool_trace") or []
+            for item in trace:
+                await events.put({
+                    "type": "tool",
+                    "tool": item.get("tool"),
+                    "round": item.get("round"),
+                    "failed": item.get("failed", False),
+                })
+            await events.put({"type": "result", "answer": result.get("answer", ""),
+                              "tool_trace": trace, "rounds": result.get("rounds", 0),
+                              "runtime_context": result.get("runtime_context")})
+        except Exception as error:
+            logger.exception("Failed to stream Agent answer")
+            await events.put({"type": "error", "message": f"{type(error).__name__}: {error}"})
+        finally:
+            agent.client.close()
+
+    async def stream():
+        task = asyncio.create_task(run_agent())
+        yield 'data: {"type":"progress","stage":"starting","message":"已连接 Agent"}\n\n'
+        while True:
+            try:
+                event = await asyncio.wait_for(events.get(), timeout=10)
+            except asyncio.TimeoutError:
+                yield ': keepalive\n\n'
+                continue
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+            if event["type"] in {"result", "error"}:
+                await task
+                return
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/diagnosis")
