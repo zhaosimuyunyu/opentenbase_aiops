@@ -1,3 +1,5 @@
+import asyncio
+import threading
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -7,6 +9,77 @@ from backend.ai.agent_client import AIOpsAgent
 
 
 class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sync_model_request_does_not_block_the_async_event_loop(self):
+        agent = AIOpsAgent(SimpleNamespace(
+            DEEPSEEK_API_KEY="fixture-key",
+            DEEPSEEK_API_BASE="https://example.invalid/v1",
+            DEEPSEEK_TIMEOUT_SECONDS=1,
+            DEEPSEEK_MODEL="fixture-model",
+        ))
+        self.addCleanup(agent.client.close)
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_request(**_kwargs):
+            started.set()
+            release.wait(timeout=0.5)
+            return "complete"
+
+        with patch.object(
+            agent.client.chat.completions, "create", side_effect=blocking_request
+        ):
+            task = asyncio.create_task(agent._create_completion(model="fixture-model"))
+            try:
+                await asyncio.sleep(0)
+                self.assertFalse(task.done())
+                self.assertTrue(await asyncio.to_thread(started.wait, 0.5))
+            finally:
+                release.set()
+            self.assertEqual(await task, "complete")
+
+    async def test_health_audit_retrieves_bounded_knowledge_and_uses_one_model_request(self):
+        config = SimpleNamespace(
+            DEEPSEEK_API_KEY="fixture-key",
+            DEEPSEEK_API_BASE="https://example.invalid/v1",
+            DEEPSEEK_TIMEOUT_SECONDS=1,
+            DEEPSEEK_MODEL="fixture-model",
+        )
+        agent = AIOpsAgent(config)
+        self.addCleanup(agent.client.close)
+        report = (
+            '{"root_cause":"Prepared transaction blocks waiters",'
+            '"risk_level":"high","evidence":["xid 42"],"recommendations":[]}'
+        )
+        evidence = {
+            "cluster": {"prepared_transactions": [{"transaction_id": "42"}]},
+            "findings": [{"check": "prepared_transaction_blocker"}],
+            "performance": {"irrelevant_payload": "discard-this-from-the-model-context"},
+        }
+        references = [{"source_url": "https://example.invalid/2pc", "content": "pg_clean guidance"}]
+        with patch(
+            "backend.ai.agent_client.execute_search_knowledge",
+            new=AsyncMock(return_value={"results": references}),
+        ) as search, patch.object(
+            agent.client.chat.completions,
+            "create",
+            Mock(return_value=SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=report)
+            )])),
+        ) as completion:
+            result = await agent.diagnose("Review prepared transaction", evidence)
+
+        search.assert_awaited_once()
+        self.assertIn("pg_clean_check_txn", search.await_args.kwargs["query"])
+        self.assertEqual(search.await_args.kwargs["top_k"], 6)
+        completion.assert_called_once()
+        self.assertNotIn("tools", completion.call_args.kwargs)
+        prompt = completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("pg_clean guidance", prompt)
+        self.assertNotIn("discard-this-from-the-model-context", prompt)
+        self.assertEqual(result["knowledge_refs"], references)
+        self.assertEqual(result["structured"]["risk_level"], "high")
+        self.assertFalse(result["analysis_fallback"])
+
     async def test_chat_executes_selected_sql_tool_then_uses_result_in_followup(self):
         from backend.ai.agent_client import AIOpsAgent
 
