@@ -7,7 +7,8 @@ $apiUrl = if ($env:AIOPS_API_URL) { $env:AIOPS_API_URL } else { "http://localhos
 
 Write-Output "[1/8] Checking live API and OpenTenBase connection"
 $health = Invoke-RestMethod "$apiUrl/health" -TimeoutSec 10
-if ($health.api -ne "healthy" -or $health.database.status -ne "success") {
+$openTenBase = $health.components.opentenbase
+if ($health.api -ne "healthy" -or -not $openTenBase.connected -or $openTenBase.status -ne "success") {
     throw "AIOps API or OpenTenBase connection is unhealthy"
 }
 $health | ConvertTo-Json -Depth 4
