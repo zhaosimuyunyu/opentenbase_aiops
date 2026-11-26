@@ -134,7 +134,11 @@ opentenbase-aiops/
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
 
-风险策略由程序根据操作白名单和危险关键词确定，模型不能自行降低风险等级。白名单只读工具可由 Agent 自动调用。当前唯一开放的写操作是 `ANALYZE`，属于需要人工批准的中风险操作。危险或未知操作要求人工审批，且没有对应执行器时仍会拒绝执行。人工批准通过 `/api/repairs/{request_id}/human-approval` 单独记录，随后调用批准执行接口。删除库、删表和任意 SQL 不在执行白名单内。
+交互式智能问答 Agent 处于开发验证模式，提供实时 CN/DN/GTM 诊断、全分类知识检索，以及直接执行任意 SQL 的 `execute_sql` 工具。该聊天工具不做操作关键词拦截、不要求额外审批，可通过 `node_name` 将 SQL 发送到指定注册 CN/DN；未指定节点时走配置的 CN。GTM 使用原生协议，不接受 PostgreSQL SQL，只提供 TCP 诊断。数据库实际权限由 `DB_USER` 决定，工具不会提升或模拟权限。每次调用会记录目标节点、SQL SHA-256、命令类型、行数、错误码和耗时，不在执行审计表中保存 SQL 原文或结果。请在明确的开发/测试环境使用该模式，并由操作人员自行决定发送的语句。
+
+独立 `/api/repairs` 工作流仍保留其具名审批和专用执行器机制，用于计划任务及结构化修复请求。该审批层不会拦截聊天 Agent 的 `execute_sql`。`/api/sql-audit` 仍是可选的静态 SQL 风险分析入口，不是聊天执行器的前置闸门。
+
+当前 OpenTenBase v5.0 环境验证过的基础分布式建表语法为 `DISTRIBUTE BY SHARD(id) TO GROUP default_group` 和 `DISTRIBUTE BY REPLICATION TO GROUP default_group`。该环境拒绝 `DISTRIBUTE BY HASH`，临时表曾报 `default group not defined`。GTM 使用原生协议，不能将其 PostgreSQL 端口当作 SQL 端点。系统提示已注入这些实测方言信息，Agent 仍可继续搜索官方文档查证版本差异。
 
 如果业务表不适合转移给修复账号所有，管理员可以使用 `scripts/install_repair_function.sql` 安装最小权限的 `SECURITY DEFINER` 统计函数。该函数只接受正则校验后的 schema/table，并且只允许管理员维护的 `aiops_admin.repair_targets` 视图中列出的目标。视图默认为空，管理员可按脚本示例将其替换为显式 `VALUES` 白名单，不需要创建分布式配置表。管理员完成函数和目标白名单后，将 `AIOPS_REPAIR_FUNCTION_ENABLED=true` 配合独立非超级用户启用。应用会检查函数确实是 `SECURITY DEFINER` 且当前账号有 `EXECUTE` 权限，否则回退到逐 DN 所有权校验并拒绝越权执行。
 

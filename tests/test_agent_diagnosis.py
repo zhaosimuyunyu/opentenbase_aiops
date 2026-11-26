@@ -7,6 +7,76 @@ from backend.ai.agent_client import AIOpsAgent
 
 
 class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_executes_selected_sql_tool_then_uses_result_in_followup(self):
+        from backend.ai.agent_client import AIOpsAgent
+
+        config = SimpleNamespace(
+            DEEPSEEK_API_KEY="fixture-key",
+            DEEPSEEK_API_BASE="https://example.invalid/v1",
+            DEEPSEEK_TIMEOUT_SECONDS=1,
+            DEEPSEEK_MODEL="fixture-model",
+            DB_HOST="cn", DB_PORT=11003, DB_NAME="postgres", DB_USER="admin",
+            EMBEDDING_MODEL="bge-m3", EMBEDDING_API_BASE="https://embed.invalid/v1",
+            AIOPS_AUTO_AUDIT_ENABLED=True,
+            AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=900, AIOPS_AUTO_REPAIR_ENABLED=False,
+            AIOPS_CANCEL_QUERY_ENABLED=False, AIOPS_REPAIR_DB_USER="",
+            AIOPS_AUTO_AUDIT_TARGETS=(None,), AIOPS_AUTO_REPAIR_TARGETS=(),
+            AIOPS_REPAIR_FUNCTION_ENABLED=False, AIOPS_REPAIR_FUNCTION_SCHEMA="aiops_admin",
+            AIOPS_REPAIR_FUNCTION_NAME="analyze_table",
+        )
+        agent = AIOpsAgent(config)
+        self.addCleanup(agent.client.close)
+        tool_call = SimpleNamespace(
+            id="sql-1",
+            function=SimpleNamespace(name="execute_sql", arguments='{"sql":"SELECT 1 AS value"}'),
+        )
+        messages = [
+            SimpleNamespace(content=None, tool_calls=[tool_call]),
+            SimpleNamespace(content="查询返回 1。", tool_calls=[]),
+        ]
+        with patch.object(agent.client.chat.completions, "create", Mock(side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=item)]) for item in messages
+        ])) as completion, patch(
+            "backend.ai.agent_client.execute_sql",
+            new=AsyncMock(return_value={"success": True, "rows": [{"value": 1}]}),
+        ) as execute:
+            result = await agent.chat("查询当前数据库", [{"role": "user", "content": "确认连接"}])
+
+        self.assertEqual(result["answer"], "查询返回 1。")
+        self.assertEqual(result["rounds"], 1)
+        self.assertTrue(result["tool_trace"][0]["success"])
+        execute.assert_awaited_once_with(sql="SELECT 1 AS value")
+        first_messages = completion.call_args_list[0].kwargs["messages"]
+        self.assertIn("connected_via_live_connector", first_messages[0]["content"])
+        self.assertIn("DISTRIBUTE BY SHARD(id) TO GROUP default_group", first_messages[0]["content"])
+        self.assertIn('"sql_operation_approval_required": false', first_messages[0]["content"])
+        self.assertIn('"chat_sql_can_execute_ddl_dml_admin_functions": true', first_messages[0]["content"])
+        self.assertIn('"cancel_query_flag_scope":', first_messages[0]["content"])
+        self.assertEqual(first_messages[1]["content"], "确认连接")
+
+    async def test_fallback_separates_dn_lock_waits_from_prepared_transaction_finding(self):
+        report = AIOpsAgent._fallback_diagnosis({
+            "findings": [
+                {
+                    "check": "prepared_transaction_blocker",
+                    "observed": "1 prepared transaction matches a coordinator wait",
+                    "evidence": [{"transaction_id": "42", "gid": "gid-1", "database": "postgres"}],
+                },
+                {
+                    "check": "data_node_lock_waits",
+                    "evidence": {"waits": [{
+                        "node_name": "dn0001", "waiting_pid": 200,
+                        "locktype": "advisory", "blockers": [{"pid": 100}],
+                    }]},
+                },
+            ]
+        }, TimeoutError("model timed out"))
+
+        root_cause = report["structured"]["root_cause"]
+        self.assertIn("At least one coordinator lock wait", root_cause)
+        self.assertIn("Separate data-node lock waits", report["structured"]["evidence"][-1])
+        self.assertIn("dn0001 advisory wait", report["structured"]["evidence"][-1])
+
     async def test_tool_results_with_datetime_are_serialized_for_followup_turn(self):
         agent = AIOpsAgent(SimpleNamespace(
             DEEPSEEK_API_KEY="fixture-key",

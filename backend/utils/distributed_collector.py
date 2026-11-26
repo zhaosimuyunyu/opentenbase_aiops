@@ -1,6 +1,7 @@
 """Distributed multi-node data collection for OpenTenBase"""
 import logging
 import psycopg2
+from copy import copy
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg2.extras import RealDictCursor
@@ -25,9 +26,8 @@ class NodeConnection:
     def connect(self) -> bool:
         """Establish connection to this node"""
         try:
-            # Create a modified config for this specific node
-            # Create a modified config for this specific node
-            node_config = Config()
+            # Keep per-node endpoints isolated from the shared coordinator settings.
+            node_config = copy(self.config)
             node_config.DB_HOST = self.node_host
             node_config.DB_PORT = self.node_port
             node_config.DB_USER = self.config.DB_USER
@@ -83,9 +83,7 @@ class DistributedCollector:
         self.coordinator = OpenTenBaseConnector(config)
 
     ALLOWED_CHECKS = {
-        "database_info", "connections", "max_connections", "replication",
-        "prepared_transactions", "locks", "long_running_queries", "idle_transactions",
-        "table_stats", "index_usage", "key_guc", "storage",
+        *CHECKS.keys(),
     }
 
     def collect_diagnostics(self, node_filter=None, check_names=None):

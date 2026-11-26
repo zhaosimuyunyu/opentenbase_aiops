@@ -775,26 +775,28 @@ elif page == "💬 智能问答":
             if st.session_state.llm_client:
                 with st.spinner("思考中..."):
                     try:
-                        # Collect context
-                        collector = ClusterCollector(st.session_state.db_connector)
-                        cluster_data = collector.collect().get('data', {})
-
-                        context = f"""
-当前集群状态：
-- 节点数: {len(cluster_data.get('nodes', []))}
-- 连接数: {cluster_data.get('connections', {}).get('total', 'unknown')}
-- 复制状态: {len(cluster_data.get('replication', []))} 个复制连接
-"""
-
-                        response = st.session_state.llm_client.answer_question(
-                            question=prompt,
-                            context=context
+                        api_base = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
+                        history = [
+                            {"role": message["role"], "content": message["content"]}
+                            for message in st.session_state.messages[:-1]
+                            if message["role"] in {"user", "assistant"}
+                        ][-16:]
+                        response = requests.post(
+                            f"{api_base}/api/qa/ask",
+                            json={"question": prompt, "include_context": True, "history": history},
+                            timeout=900,
                         )
-
-                        st.markdown(response)
+                        response.raise_for_status()
+                        result = response.json()
+                        answer = result.get("answer", "")
+                        st.markdown(answer)
+                        trace = result.get("tool_trace") or []
+                        if trace:
+                            with st.expander("本轮工具调用与 SQL 执行"):
+                                st.json(trace)
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": response
+                            "content": answer
                         })
                     except Exception as e:
                         error_msg = f"抱歉，处理您的问题时出错了: {str(e)}"

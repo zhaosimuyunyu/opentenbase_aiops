@@ -28,6 +28,7 @@ class RepairClaimTests(unittest.TestCase):
         value = CAPABILITIES
         repairs = value["repairs"]
         self.assertEqual(repairs["verified_executors"], ["analyze_table"])
+        self.assertTrue(CAPABILITIES["interactive_agent"]["unrestricted_sql_tool"])
         self.assertFalse(repairs["automatic_prepared_transaction_resolution"])
         self.assertIn("kill_connection", repairs["suggestion_only"])
         self.assertIn("cancel_query", repairs["suggestion_only"])

@@ -4,10 +4,13 @@ from openai import OpenAI, APIConnectionError, APIStatusError
 from ..utils.config import Config
 from ..tools.knowledge_search_tool import TOOL_SCHEMA as KNOWLEDGE_TOOL_SCHEMA, execute_search_knowledge
 from ..tools.lock_audit_tool import LOCK_TOOL_SCHEMA, execute_get_database_locks
+from ..tools.execute_sql_tool import TOOL_SCHEMA as EXECUTE_SQL_TOOL_SCHEMA, execute_sql
+from ..tools.cluster_diagnostics_tool import TOOL_SCHEMA as CLUSTER_TOOL_SCHEMA, execute_cluster_diagnostics
 from ..security.permissions import OperationRegistry
 
 MAX_KNOWLEDGE_TOOL_CALLS = 3
 MAX_DIAGNOSTIC_TOOL_CALLS = 2
+MAX_CHAT_TOOL_ROUNDS = 8
 TOOL_SCHEMAS = [KNOWLEDGE_TOOL_SCHEMA, LOCK_TOOL_SCHEMA]
 TOOL_HANDLERS = {
     "search_knowledge": execute_search_knowledge,
@@ -41,11 +44,161 @@ def _model_evidence(value):
 class AIOpsAgent:
     def __init__(self, config=None):
         c = config or Config()
+        self.config = c
         self.client = OpenAI(
             api_key=c.DEEPSEEK_API_KEY, base_url=c.DEEPSEEK_API_BASE,
             timeout=c.DEEPSEEK_TIMEOUT_SECONDS, max_retries=0,
         )
         self.model = c.DEEPSEEK_MODEL
+
+    def _runtime_context(self):
+        return {
+            "database": {
+                "host": self.config.DB_HOST,
+                "port": self.config.DB_PORT,
+                "name": self.config.DB_NAME,
+                "user": self.config.DB_USER,
+                "connected_via_live_connector": True,
+            },
+            "agent": {
+                "model": self.config.DEEPSEEK_MODEL,
+                "api_base": self.config.DEEPSEEK_API_BASE,
+                "timeout_seconds": self.config.DEEPSEEK_TIMEOUT_SECONDS,
+                "sql_tool": "unrestricted_by_agent_policy; effective privileges are those of DB_USER",
+                "sql_operation_approval_required": False,
+                "chat_sql_can_execute_ddl_dml_admin_functions": True,
+                "chat_sql_uses_database_login_privileges_without_repair_approval": True,
+                "knowledge_store": "pgvector",
+                "knowledge_model": self.config.EMBEDDING_MODEL,
+                "embedding_api_base": self.config.EMBEDDING_API_BASE,
+            },
+            "automation": {
+                "health_audit_enabled": self.config.AIOPS_AUTO_AUDIT_ENABLED,
+                "health_audit_interval_seconds": self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
+                "health_audit_targets": list(self.config.AIOPS_AUTO_AUDIT_TARGETS),
+                "automatic_repair_enabled": self.config.AIOPS_AUTO_REPAIR_ENABLED,
+                "automatic_repair_targets": list(self.config.AIOPS_AUTO_REPAIR_TARGETS),
+                "cancel_query_enabled": self.config.AIOPS_CANCEL_QUERY_ENABLED,
+                "cancel_query_flag_scope": "structured_repair_workflow_only; chat execute_sql is independent",
+                "repair_function_enabled": self.config.AIOPS_REPAIR_FUNCTION_ENABLED,
+                "repair_function": (
+                    f"{self.config.AIOPS_REPAIR_FUNCTION_SCHEMA}."
+                    f"{self.config.AIOPS_REPAIR_FUNCTION_NAME}"
+                ),
+                "repair_account_configured": bool(self.config.AIOPS_REPAIR_DB_USER),
+                "repair_account_user": self.config.AIOPS_REPAIR_DB_USER or None,
+            },
+            "verified_opentenbase_sql_dialect": {
+                "version_family": "OpenTenBase v5.0",
+                "sharded_table_example": (
+                    "CREATE TABLE public.example (id bigint PRIMARY KEY, note text) "
+                    "DISTRIBUTE BY SHARD(id) TO GROUP default_group;"
+                ),
+                "replicated_table_example": (
+                    "CREATE TABLE public.example (id bigint PRIMARY KEY, note text) "
+                    "DISTRIBUTE BY REPLICATION TO GROUP default_group;"
+                ),
+                "observed_cluster_notes": [
+                    "The deployed OpenTenBase v5.0 rejects DISTRIBUTE BY HASH. Use SHARD or REPLICATION.",
+                    "CREATE TEMP TABLE has failed with default group not defined in this deployment. "
+                    "Use an explicitly distributed test table and DROP it after verification.",
+                    "GTM uses its native protocol and does not accept PostgreSQL SQL on port 11000. "
+                    "Use registered topology and TCP reachability for GTM, not a PostgreSQL query.",
+                ],
+            },
+        }
+
+    async def chat(self, question, history=None):
+        """Interactive multi-turn agent with live diagnostics, knowledge and SQL tools."""
+        system = (
+            "你是连接到 OpenTenBase 的 AIOps 运维 Agent。运行时配置和数据库拓扑必须通过"
+            "下方配置及工具读取，禁止声称只能看到用户贴出的快照或无法连接数据库。"
+            "可调用 get_cluster_diagnostics 检查实时 CN/DN/GTM 拓扑和运行状态，"
+            "可调用 get_database_locks 检查当前 CN 锁，可调用 search_knowledge 搜索全部知识库，"
+            "也可调用 execute_sql 在当前连接账号权限范围内直接执行任意 SQL，"
+            "并可用 node_name 将 SQL 发到任意一个已注册的 PostgreSQL 协议 CN 或 DN。"
+            "GTM 使用原生协议，不能执行 PostgreSQL SQL，只能通过节点诊断做 TCP 探测。"
+            "开发验证阶段不要求额外审批或关键词白名单，用户明确要求运维时可直接执行 SQL 工具。"
+            "执行 SQL 前先基于实时证据确认目标，避免猜测拓扑、端口、PID、对象名和事务状态。"
+            "对于模拟场景优先使用独立测试会话和可清理对象。报告实际执行过的 SQL、结果和未完成项，"
+            "区分事实、推断和建议。涉及操作系统服务、容器或 pgxc_ctl 时，说明当前 Agent 只有"
+            "数据库连接工具，不能假装已经运行宿主机命令。数据库账号的实际权限以数据库返回为准。"
+            "以下运行时配置不包含密码、API key 或 token。"
+            "运行时配置：" + json.dumps(self._runtime_context(), ensure_ascii=False)
+        )
+        messages = [{"role": "system", "content": system}]
+        for item in history or []:
+            if item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str):
+                messages.append({"role": item["role"], "content": item["content"]})
+        messages.append({"role": "user", "content": question})
+        tools = [KNOWLEDGE_TOOL_SCHEMA, LOCK_TOOL_SCHEMA, CLUSTER_TOOL_SCHEMA, EXECUTE_SQL_TOOL_SCHEMA]
+        tool_trace = []
+        rounds = 0
+        response = self.client.chat.completions.create(
+            model=self.model, messages=messages, tools=tools, tool_choice="auto"
+        )
+        message = _completion_message(response)
+        while getattr(message, "tool_calls", None):
+            rounds += 1
+            calls = message.tool_calls
+            assistant_message = {
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [{
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.function.name, "arguments": call.function.arguments},
+                } for call in calls],
+            }
+            messages.append(assistant_message)
+            for call in calls:
+                name = call.function.name
+                try:
+                    arguments = json.loads(call.function.arguments or "{}")
+                    handlers = {
+                        "search_knowledge": execute_search_knowledge,
+                        "get_database_locks": execute_get_database_locks,
+                        "get_cluster_diagnostics": execute_cluster_diagnostics,
+                        "execute_sql": execute_sql,
+                    }
+                    if name not in handlers:
+                        raise ValueError(f"Unknown tool: {name}")
+                    result = await handlers[name](**arguments)
+                    failed = bool(isinstance(result, dict) and result.get("error"))
+                except Exception as error:
+                    result = {"error": f"{type(error).__name__}: {error}"}
+                    failed = True
+                trace_item = {"round": rounds, "tool": name, "failed": failed}
+                if name == "execute_sql":
+                    trace_item["sql"] = arguments.get("sql")
+                    trace_item["success"] = result.get("success")
+                    trace_item["audit_recorded"] = result.get("audit_recorded")
+                elif name == "search_knowledge":
+                    trace_item["hits"] = result.get("hits", 0)
+                tool_trace.append(trace_item)
+                messages.append({
+                    "role": "tool", "tool_call_id": call.id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                })
+            if rounds >= MAX_CHAT_TOOL_ROUNDS:
+                messages.append({
+                    "role": "system",
+                    "content": "已达到本轮工具调用轮数上限。请基于已取得结果总结，说明剩余未完成项。",
+                })
+                response = self.client.chat.completions.create(
+                    model=self.model, messages=messages
+                )
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model, messages=messages, tools=tools, tool_choice="auto"
+                )
+            message = _completion_message(response)
+        return {
+            "answer": message.content or "",
+            "tool_trace": tool_trace,
+            "rounds": rounds,
+            "runtime_context": self._runtime_context(),
+        }
 
     async def diagnose(self, issue_description, context):
         prompt = issue_description + chr(10) + '当前证据:' + chr(10) + json.dumps(
@@ -196,6 +349,14 @@ class AIOpsAgent:
             (item for item in findings if item.get('check') == 'prepared_transaction_blocker'),
             None,
         )
+        data_node_lock_finding = next(
+            (item for item in findings if item.get('check') == 'data_node_lock_waits'),
+            None,
+        )
+        data_node_waits = (
+            (data_node_lock_finding.get('evidence') or {}).get('waits', [])
+            if data_node_lock_finding else []
+        )
         evidence = []
         recommendations = []
         if prepared:
@@ -215,16 +376,31 @@ class AIOpsAgent:
                 ],
             ])
             root_cause = (
-                'Observed waiting locks match a prepared transaction. This is direct evidence '
-                'that the prepared transaction is holding the transaction ID lock. The audit '
-                'does not determine whether the transaction should be committed or rolled back.'
+                'At least one coordinator lock wait matches a prepared transaction. '
+                'The audit does not determine whether that transaction should be committed or rolled back.'
             )
+            if data_node_waits:
+                node_wait_summary = [
+                    f"{wait.get('node_name')} {wait.get('locktype')} wait "
+                    f"(waiter PID {wait.get('waiting_pid')})"
+                    for wait in data_node_waits
+                ]
+                evidence.append(
+                    'Separate data-node lock waits were observed and are not attributed to the '
+                    'prepared transaction without matching transaction-ID evidence: '
+                    + '; '.join(node_wait_summary)
+                )
             risk_level = 'high'
             recommendations.extend([
                 'Read pg_prepared_xacts and pg_locks again to confirm the transaction ID, GID, owner, database, and current waiters.',
                 'Ask the transaction owner or DBA to determine the intended outcome from the distributed transaction coordinator and application records.',
                 'Resolve the prepared transaction only through an approved DBA change. COMMIT PREPARED and ROLLBACK PREPARED change database state.',
             ])
+            if data_node_waits:
+                recommendations.append(
+                    'Investigate each data-node lock wait separately using its node, lock type, '
+                    'waiter PID, blocker PID, application name, and query evidence.'
+                )
             diagnostic = ((context.get('cluster') or {}).get('pg_clean_diagnostics') or [{}])[0]
             if diagnostic.get('registered') is False:
                 recommendations.append(
@@ -242,6 +418,27 @@ class AIOpsAgent:
                     'Have the DBA verify pg_clean prerequisites on all participants and use '
                     'pg_clean_check_txn to collect cluster-wide transaction status.'
                 )
+        elif data_node_waits:
+            node_names = sorted({wait.get('node_name') for wait in data_node_waits if wait.get('node_name')})
+            lock_types = sorted({wait.get('locktype') for wait in data_node_waits if wait.get('locktype')})
+            root_cause = (
+                f"OpenTenBase data nodes report {len(data_node_waits)} lock wait relationship(s) "
+                f"on {', '.join(node_names)} ({', '.join(lock_types)}). The blocker sessions are "
+                'identified, but the audit timeout prevents assigning a deeper transaction cause.'
+            )
+            risk_level = 'high'
+            evidence.extend([
+                f"Waiter PID {wait.get('waiting_pid')} on {wait.get('node_name')} is blocked by "
+                + ', '.join(
+                    f"PID {blocker.get('pid')} ({blocker.get('usename')} / {blocker.get('application_name')})"
+                    for blocker in wait.get('blockers', [])
+                )
+                for wait in data_node_waits
+            ])
+            recommendations.append(
+                'Recheck the current DN lock graph and confirm the blocker owner and application impact. '
+                'Do not infer that a separate prepared transaction caused this wait.'
+            )
         else:
             root_cause = 'AI analysis failed. The collected audit evidence remains available for review.'
             risk_level = 'unknown'

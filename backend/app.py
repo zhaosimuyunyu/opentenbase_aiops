@@ -16,6 +16,7 @@ from .utils.distributed_collector import DistributedCollector
 from .collectors.cluster import ClusterCollector
 from .collectors.performance import PerformanceCollector
 from .ai.llm_client import DeepSeekClient
+from .ai.agent_client import AIOpsAgent
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .utils.operations_store import OperationsStore
 from psycopg2.extras import Json, RealDictCursor
@@ -78,6 +79,7 @@ llm_client = DeepSeekClient(config)
 class QuestionRequest(BaseModel):
     question: str
     include_context: bool = True
+    history: list[dict[str, str]] = Field(default_factory=list)
 
 
 class DiagnosisRequest(BaseModel):
@@ -173,27 +175,18 @@ async def get_performance_metrics():
 
 @app.post("/api/qa/ask")
 async def ask_question(request: QuestionRequest):
-    """Ask a question to the AI assistant"""
+    """Run a multi-turn live AIOps agent with database, diagnostics and knowledge tools."""
+    agent = AIOpsAgent(config)
     try:
-        context = None
-        if request.include_context:
-            # Get current cluster status as context
-            cluster_data = cluster_collector.collect()
-            context = f"当前集群状态：{cluster_data.get('data', {})}"
-
-        answer = llm_client.answer_question(
-            question=request.question,
-            context=context
+        result = await asyncio.to_thread(
+            lambda: asyncio.run(agent.chat(request.question, request.history))
         )
-
-        return {
-            "question": request.question,
-            "answer": answer,
-            "context_included": request.include_context
-        }
+        return {"question": request.question, **result}
     except Exception as e:
         logger.error(f"Failed to answer question: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        agent.client.close()
 
 
 @app.post("/api/diagnosis")
