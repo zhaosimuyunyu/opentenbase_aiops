@@ -27,28 +27,54 @@ def _summarize(results):
     durations = [result["duration_ms"] for result in results]
     status_counts = {}
     errors_by_check = {}
+    errors_by_sqlstate = {}
     for result in results:
         status = result["status"]
         status_counts[status] = status_counts.get(status, 0) + 1
-        for check in result["errors"]:
+        for check, error in result["errors"].items():
             errors_by_check[check] = errors_by_check.get(check, 0) + 1
+            sqlstate = error.get("sqlstate")
+            if sqlstate:
+                errors_by_sqlstate[sqlstate] = errors_by_sqlstate.get(sqlstate, 0) + 1
     return {
         "runs": len(results),
+        "error_count": sum(len(result["errors"]) for result in results),
         "status_counts": status_counts,
         "median_ms": round(statistics.median(durations), 2),
         "p95_ms_nearest_rank": round(_nearest_rank(durations, 0.95), 2),
         "max_ms": round(max(durations), 2),
         "errors_by_check": errors_by_check,
+        "errors_by_sqlstate": errors_by_sqlstate,
     }
 
 
 def _collect(config, run_number):
-    result = ReadonlyHealthCollector(config).collect()
+    started = time.perf_counter()
+    try:
+        result = ReadonlyHealthCollector(config).collect()
+    except Exception as error:
+        return {
+            "run": run_number,
+            "status": "error",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            "errors": {
+                "collector": {
+                    "type": type(error).__name__,
+                    "sqlstate": getattr(error, "pgcode", None),
+                }
+            },
+        }
     return {
         "run": run_number,
         "status": result["status"],
         "duration_ms": result["collection_duration_ms"],
-        "errors": sorted(result["errors"]),
+        "errors": {
+            check: {
+                "type": error.get("type"),
+                "sqlstate": error.get("sqlstate"),
+            }
+            for check, error in result["errors"].items()
+        },
     }
 
 
