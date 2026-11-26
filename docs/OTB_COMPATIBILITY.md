@@ -180,6 +180,8 @@ Operational memory 当前查询为空是预期结果，因为现场没有配置�
 
 同一轮巡检从两个 DN 成功取得 27 条表统计、76 条索引统计和 52 条存储记录，错误数为 0。此前记录的 DN 本地 prepared 事务和目录扫描锁超时属于较早观测，不能据此判断当前 DN 状态。CN 上 prepared 事务与等待者的根因关联仍未由官方 `pg_unlock` / `pg_clean` 诊断接口交叉验证，不能据此自动提交或回滚事务。
 
+使用该审计的 `prepared_transaction_blocker` finding 分别向 `analyze_table` 和 `cancel_query` 提案接口发起负向验收，两者均在创建修复请求前返回 HTTP 400；`ANALYZE` 因 finding 类型不符被拒绝，`cancel_query` 因缺少逐 DN blocker 身份被拒绝。请求总数前后均为 8，没有新增执行或审批记录。
+
 ### 数据节点目录分段复测
 
 在当前实验集群上，通过 CN 对 DN1 和 DN2 执行相同的只读 `pg_class` 计数查询。查询限定普通表（`relkind = 'r'`），锁超时为 300 ms，语句超时为 2 秒。
