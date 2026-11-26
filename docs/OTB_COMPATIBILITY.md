@@ -126,6 +126,18 @@ API 容器能够通过 psycopg2 连接 OpenTenBase_v5.0 的 CN，读取节点注
 
 GXID `21973` 的 prepared transaction 和关联锁等待仍被报告为高风险，没有执行提交或回滚。官方 `pg_clean` 扩展在当前集群仍未安装，因此官方 2PC 状态诊断分支未被现场执行。
 
+### 2026-11-26 SSE 场景验收与 readiness
+
+`backend/tools/simulate_slow_query.py` 在 CN 会话中执行 15 秒 `pg_sleep`，通过慢日志记录捕获 `aiops-course-slow-query-demo`、PID、SQL 和约 15 秒耗时。SSE 返回完整审计结果，AI 使用真实模型分析，慢查询进入 `long_running_queries` 发现，模拟会话自然结束。审计 ID 为 `9f525178-4f01-4325-b0ab-a66d79bcca9f`。
+
+`backend/tools/simulate_lock_wait.py` 在 `dn0001` 创建 advisory-lock blocker 和 waiter。直连 DN 查询确认 waiter 被 blocker PID 阻塞，随后 SSE 巡检生成 `data_node_lock_waits` 发现并捕获 blocker 的 application name。审计 ID 为 `5d363187-9616-4a70-aaeb-02e6f26140e8`，模拟结束后两个连接均已从 `pg_stat_activity` 消失；未执行修复。
+
+API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 metadata PostgreSQL，依赖均连接时返回 HTTP 200 和 `ready`，任一依赖失败时返回 HTTP 503 和 `not_ready`。当前容器实测两项依赖均连接，API、前端和知识库容器健康。
+
+只读审计新记录显式保存为 `completed`。历史只读审计中遗留的默认 `pending` 状态会在审计列表和详情 API 中规范化为 `completed`，repair request 的审批状态不变。通过真实 SSE 巡检及审计详情回读验证了新旧状态。
+
+这些场景验证功能闭环和故障发现，不构成生产并发负载下的容量或开销验收。独立修复账号未配置，本轮没有执行数据库修复。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。

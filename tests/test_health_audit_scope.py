@@ -44,6 +44,9 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["structured"]["analysis_source"], "deterministic_evidence_rules")
         persisted = store.return_value.conn.cursor.return_value.__enter__
         self.assertTrue(persisted.return_value.execute.called)
+        insert = store.return_value.conn.cursor.return_value.__enter__.return_value.execute.call_args_list[-1]
+        self.assertIn("risk_level,status)", insert.args[0])
+        self.assertIn("'completed'", insert.args[0])
 
     async def test_persists_data_node_lock_blockers_in_performance_evidence(self):
         module = "backend.engines.readonly_audit_engine"

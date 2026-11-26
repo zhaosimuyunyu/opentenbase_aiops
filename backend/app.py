@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Literal, Optional
 
@@ -21,6 +21,8 @@ from .ai.agent_client import AIOpsAgent
 from .engines.readonly_audit_engine import ReadonlyAuditEngine
 from .utils.operations_store import OperationsStore
 from .utils.operational_memory import OperationalMemory
+from .utils.audit_status import normalize_audit_record
+from .utils.readiness import build_readiness
 from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
@@ -223,12 +225,28 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    db_status = db_connector.test_connection()
-    return {
-        "api": "healthy",
-        "database": db_status
-    }
+    """Report whether required database dependencies can serve requests."""
+    database_status = db_connector.test_connection()
+    metadata_status = {"connected": False}
+    metadata_store = None
+    try:
+        metadata_store = OperationsStore(connect_timeout=2)
+        with metadata_store.conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        metadata_status = {"connected": True}
+    except Exception as error:
+        metadata_status["error"] = type(error).__name__
+        logger.warning("Metadata database readiness check failed: %s", type(error).__name__)
+    finally:
+        if metadata_store is not None:
+            metadata_store.close()
+
+    readiness = build_readiness(database_status, metadata_status)
+    return JSONResponse(
+        readiness,
+        status_code=200 if readiness["status"] == "ready" else 503,
+    )
 
 
 @app.get("/api/capabilities")
@@ -737,7 +755,7 @@ def list_audits(
                  ["critical"] if risk == "critical" else ["high", "critical"],
                  table, table, database, database, limit, offset),
             )
-            records = [dict(row) for row in cursor.fetchall()]
+            records = [normalize_audit_record(row) for row in cursor.fetchall()]
         return {"items": records, "limit": limit, "offset": offset}
     except Exception as error:
         logger.exception("Failed to list audit history")
@@ -766,7 +784,7 @@ def get_audit(audit_id: str):
             record = cursor.fetchone()
         if record is None:
             raise HTTPException(status_code=404, detail="Audit not found")
-        return dict(record)
+        return normalize_audit_record(record)
     except HTTPException:
         raise
     except Exception as error:

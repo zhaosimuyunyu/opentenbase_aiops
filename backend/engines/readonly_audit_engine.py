@@ -103,8 +103,8 @@ class ReadonlyAuditEngine:
             with kb.conn, kb.conn.cursor() as cur:
                 _ensure_audit_schema(cur)
                 cur.execute("""INSERT INTO audit_records(
-                    audit_id,audit_type,evidence,ai_analysis,knowledge_refs,risk_level)
-                    VALUES(%s,%s,%s,%s,%s,%s)""",
+                    audit_id,audit_type,evidence,ai_analysis,knowledge_refs,risk_level,status)
+                    VALUES(%s,%s,%s,%s,%s,%s,'completed')""",
                     (audit_id, 'readonly_lock_audit', json.dumps(locks, default=str), json.dumps(analysis, default=str),
                      json.dumps(analysis['knowledge_refs'], default=str), risk_level))
         finally:
@@ -489,8 +489,8 @@ class ReadonlyAuditEngine:
             with kb.conn, kb.conn.cursor() as cur:
                 _ensure_audit_schema(cur)
                 cur.execute("""INSERT INTO audit_records(
-                    audit_id,audit_type,evidence,ai_analysis,knowledge_refs,risk_level)
-                    VALUES(%s,%s,%s,%s,%s,%s)""",
+                    audit_id,audit_type,evidence,ai_analysis,knowledge_refs,risk_level,status)
+                    VALUES(%s,%s,%s,%s,%s,%s,'completed')""",
                     (audit_id, 'readonly_health_audit', json.dumps(evidence, default=str),
                      json.dumps(analysis, default=str),
                      json.dumps(analysis['knowledge_refs'], default=str), risk_level))
