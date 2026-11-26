@@ -75,6 +75,35 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
             snapshot["checks"]["data_node_lock_blockers"],
         )
 
+    async def test_slow_query_log_records_create_a_finding_and_are_persisted(self):
+        module = "backend.engines.readonly_audit_engine"
+        slow_queries = [{
+            "node_name": "cn0001", "pid": 42, "application_name": "course-demo",
+            "duration_ms": 12015.69, "query": "SELECT pg_sleep(12)",
+            "source": "server_csv_log",
+        }]
+        snapshot = {
+            "status": "success", "errors": {},
+            "checks": {
+                "locks": [], "connections": [],
+                "max_connections": [{"max_connections": 100}],
+                "long_running_queries": [], "data_node_long_running_queries": [],
+                "slow_query_logs": slow_queries, "idle_transactions": [], "nodes": [],
+            },
+        }
+        with patch(f"{module}.OperationsStore"), patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(
+            ReadonlyAuditEngine, "_diagnose",
+            new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []}),
+        ):
+            collector.return_value.collect.return_value = snapshot
+            result = await ReadonlyAuditEngine().run_health_audit()
+
+        finding = next(item for item in result["findings"] if item["check"] == "long_running_queries")
+        self.assertEqual(finding["evidence"], slow_queries)
+        self.assertEqual(result["evidence"]["performance"]["slow_query_logs"], slow_queries)
+
     async def test_prepared_transaction_reports_missing_official_record_diagnostic(self):
         module = "backend.engines.readonly_audit_engine"
         snapshot = {

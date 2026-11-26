@@ -7,6 +7,7 @@ from psycopg2.extras import RealDictCursor
 
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
+from .slow_query_logs import SlowQueryLogCollector
 
 
 def _collection_error(error):
@@ -220,6 +221,11 @@ class ReadonlyHealthCollector:
                             "type": "NodeConnectivity",
                             "message": node["error"] or "Node endpoint is unavailable",
                         }
+                slow_query_logs, slow_query_log_errors = SlowQueryLogCollector(
+                    self.config
+                ).collect(nodes)
+                results["slow_query_logs"] = slow_query_logs
+                errors.update(slow_query_log_errors)
             if any(node.get("node_type") == "D" for node in nodes):
                 blocker_rows, blocker_errors = self._collect_data_node_lock_blockers(connection, nodes)
                 results["data_node_lock_blockers"] = blocker_rows

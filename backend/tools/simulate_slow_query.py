@@ -1,6 +1,7 @@
 """Create an isolated long-running query and verify health-audit diagnosis."""
 import argparse
 import json
+import math
 import threading
 import time
 from urllib.request import Request, urlopen
@@ -53,29 +54,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-url", default="http://127.0.0.1:8000")
     parser.add_argument("--timeout", type=int, default=210)
-    parser.add_argument("--hold-seconds", type=int, default=240)
+    parser.add_argument("--hold-seconds", type=int, default=15)
     args = parser.parse_args()
 
     config = Config()
-    coordinator = connect(
-        host=config.DB_HOST, port=config.DB_PORT, dbname=config.DB_NAME,
-        user=config.DB_USER, password=config.DB_PASSWORD, connect_timeout=8,
-    )
-    try:
-        with coordinator.cursor() as cursor:
-            cursor.execute(
-                "SELECT node_name,node_host,node_port FROM pgxc_node "
-                "WHERE node_type='D' ORDER BY node_name LIMIT 1"
-            )
-            node = cursor.fetchone()
-    finally:
-        coordinator.close()
-    if not node:
-        raise RuntimeError("No OpenTenBase data node is registered")
-    node_name, node_host, node_port = node
+    node_name = f"CN entry {config.DB_HOST}:{config.DB_PORT}"
     connection = connect(
-        host=node_host,
-        port=node_port,
+        host=config.DB_HOST,
+        port=config.DB_PORT,
         dbname=config.DB_NAME,
         user=config.DB_USER,
         password=config.DB_PASSWORD,
@@ -83,6 +69,16 @@ def main():
         connect_timeout=8,
     )
     connection.autocommit = True
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT setting::int FROM pg_catalog.pg_settings "
+            "WHERE name='log_min_duration_statement'"
+        )
+        log_threshold_ms = cursor.fetchone()[0]
+    if log_threshold_ms < 0:
+        connection.close()
+        raise RuntimeError("OpenTenBase slow-statement logging is disabled")
+    hold_seconds = max(args.hold_seconds, math.ceil(log_threshold_ms / 1000) + 2)
     query_started = threading.Event()
     query_error = []
     session = {}
@@ -94,7 +90,7 @@ def main():
                 cursor.execute("SELECT pg_backend_pid()")
                 session["pid"] = cursor.fetchone()[0]
                 query_started.set()
-                cursor.execute("SELECT pg_sleep(%s)", (args.hold_seconds,))
+                cursor.execute("SELECT pg_sleep(%s)", (hold_seconds,))
         except Exception as error:
             query_error.append(f"{type(error).__name__}: {error}")
             query_started.set()
@@ -107,8 +103,8 @@ def main():
             raise RuntimeError("Could not start the simulated slow query: " + "; ".join(query_error))
         time.sleep(6)
         observer = connect(
-            host=node_host,
-            port=node_port,
+            host=config.DB_HOST,
+            port=config.DB_PORT,
             dbname=config.DB_NAME,
             user=config.DB_USER,
             password=config.DB_PASSWORD,
@@ -130,6 +126,13 @@ def main():
                     }
         finally:
             observer.close()
+        worker.join(hold_seconds + 10)
+        if worker.is_alive():
+            connection.cancel()
+            worker.join(10)
+            raise RuntimeError("The simulated slow query did not finish within the expected time")
+        if query_error:
+            raise RuntimeError("The simulated slow query failed: " + "; ".join(query_error))
         audit, events = _run_audit(args.api_url, args.timeout)
         if audit is None:
             print(json.dumps({
@@ -142,7 +145,7 @@ def main():
             }, ensure_ascii=False, indent=2))
             return
         captured = [
-            row for row in ((audit.get("evidence") or {}).get("performance") or {}).get("long_running_queries") or []
+            row for row in ((audit.get("evidence") or {}).get("performance") or {}).get("slow_query_logs") or []
             if row.get("pid") == session.get("pid")
             and row.get("application_name") == APP_NAME
         ]
@@ -160,7 +163,7 @@ def main():
                 "database": config.DB_NAME,
                 "pid": session["pid"],
                 "application_name": APP_NAME,
-                "direct_dn_pg_stat_activity": direct_observation,
+                "live_pg_stat_activity": direct_observation,
                 "audit_id": audit.get("audit_id"),
                 "collection_status": (audit.get("evidence") or {}).get("collection_status"),
                 "collection_errors": (audit.get("evidence") or {}).get("collection_errors"),
@@ -174,16 +177,17 @@ def main():
             "database": config.DB_NAME,
             "pid": session["pid"],
             "application_name": APP_NAME,
-            "direct_dn_pg_stat_activity": direct_observation,
+            "hold_seconds": hold_seconds,
+            "live_pg_stat_activity": direct_observation,
             "query": captured[0].get("query"),
-            "duration": str(captured[0].get("duration")),
+            "duration_ms": captured[0].get("duration_ms"),
             "audit_id": audit.get("audit_id"),
             "risk_level": audit.get("risk_level"),
             "finding": finding.get("observed"),
             "analysis_source": (audit.get("structured") or {}).get("analysis_source"),
             "knowledge_reference_count": len(audit.get("knowledge_refs") or []),
             "sse_event_types": [event["type"] for event in events],
-            "cleanup": "cancelled only the pg_sleep demo session",
+            "cleanup": "the pg_sleep demo session completed naturally",
         }
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     finally:

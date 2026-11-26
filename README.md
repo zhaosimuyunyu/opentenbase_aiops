@@ -131,6 +131,7 @@ opentenbase-aiops/
 | `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` | 周期巡检间隔秒数，最小 60 秒 | `900` |
 | `AIOPS_AUTO_AUDIT_TABLE` | 周期巡检统计目标，支持逗号分隔，例如 `public.orders,public.items` | 空，使用全库采集 |
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |
+| `AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS` | 从 CN/DN CSV 日志中读取近期慢语句的时间窗口 | `900` |
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |
 
@@ -212,6 +213,8 @@ docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --re
 1. 进入 "📊 健康监控" 页面
 2. 查看集群节点、连接数、复制状态
 3. 点击 "生成健康报告" 获取 AI 分析
+
+巡检同时读取各 CN/DN 最近的 CSV 慢语句日志，只报告配置时间窗口内完成的语句。仅当 OpenTenBase 的 `log_min_duration_statement` 启用时，超过数据库阈值的语句会进入巡检证据。
 
 ### 智能问答
 

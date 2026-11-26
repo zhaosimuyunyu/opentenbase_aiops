@@ -81,6 +81,9 @@ class Config:
     )
     AIOPS_AUTO_AUDIT_TABLE = os.getenv("AIOPS_AUTO_AUDIT_TABLE", "").strip() or None
     AIOPS_DATA_NODE_TABLE_LIMIT = int(os.getenv("AIOPS_DATA_NODE_TABLE_LIMIT", "200"))
+    AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS = max(
+        60, int(os.getenv("AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS", "900"))
+    )
     AIOPS_DISTRIBUTED_ENABLED: bool = (
         os.getenv("AIOPS_DISTRIBUTED_ENABLED", "true").lower()
         in {"1", "true", "yes", "on"}

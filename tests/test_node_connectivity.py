@@ -86,9 +86,12 @@ class NodeConnectivityTests(unittest.TestCase):
             collector, "_collect_data_node_lock_blockers", return_value=([], {})
         ), patch.object(
             collector, "_collect_data_node_long_queries", return_value=([], {})
-        ), patch.object(
+        ), patch(
+            "backend.collectors.readonly_health.SlowQueryLogCollector"
+        ) as log_collector, patch.object(
             collector, "_collect_data_node_stats", side_effect=[([], limits), (targeted, {})]
         ) as stats:
+            log_collector.return_value.collect.return_value = ([], {})
             connection = connector.return_value.connect.return_value
             cursor = connection.cursor.return_value.__enter__.return_value
             cursor.fetchall.side_effect = [nodes if name == "nodes" else [] for name in CHECKS]
