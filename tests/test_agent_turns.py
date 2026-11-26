@@ -36,7 +36,7 @@ class AgentTurnStoreTests(unittest.TestCase):
         self.assertEqual(result, {
             "turn_id": "turn-1", "status": "running", "created": False,
         })
-        self.assertEqual(cursor.execute.call_count, 3)
+        self.assertEqual(cursor.execute.call_count, 4)
 
     def test_concurrent_start_conflict_returns_existing_turn(self):
         store = MagicMock()
@@ -89,6 +89,19 @@ class AgentTurnStoreTests(unittest.TestCase):
         self.assertEqual(count, 2)
         self.assertIn("SET status='interrupted'", cursor.execute.call_args.args[0])
         self.assertIn("WHERE status='running'", cursor.execute.call_args.args[0])
+
+    def test_restart_recovery_is_scoped_to_the_current_worker(self):
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = ("agent_turns",)
+        cursor.rowcount = 1
+        with patch("backend.engines.agent_turns.OperationsStore", return_value=store):
+            count = AgentTurnStore().mark_interrupted("worker-a")
+
+        self.assertEqual(count, 1)
+        query, parameters = cursor.execute.call_args.args
+        self.assertIn("worker_id=%s", query)
+        self.assertEqual(parameters, ("worker-a",))
 
     def test_deleting_session_also_deletes_its_agent_turns(self):
         store = MagicMock()

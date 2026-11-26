@@ -22,6 +22,7 @@ def _ensure_agent_turns(cursor):
         CREATE TABLE IF NOT EXISTS agent_turns(
             turn_id text PRIMARY KEY,
             session_id text,
+            worker_id text,
             question text NOT NULL,
             status text NOT NULL,
             answer text,
@@ -32,10 +33,11 @@ def _ensure_agent_turns(cursor):
             updated_at timestamptz NOT NULL DEFAULT now()
         )
     """)
+    cursor.execute("ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS worker_id text")
 
 
 class AgentTurnStore:
-    def start(self, session_id, turn_id, question):
+    def start(self, session_id, turn_id, question, worker_id=None):
         turn_id = turn_id or str(uuid.uuid4())
         store = OperationsStore()
         try:
@@ -83,11 +85,11 @@ class AgentTurnStore:
                         )
 
                 cursor.execute("""
-                    INSERT INTO agent_turns(turn_id,session_id,question,status)
-                    VALUES(%s,%s,%s,'running')
+                    INSERT INTO agent_turns(turn_id,session_id,worker_id,question,status)
+                    VALUES(%s,%s,%s,%s,'running')
                     ON CONFLICT(turn_id) DO NOTHING
                     RETURNING turn_id
-                """, (turn_id, session_id, question))
+                """, (turn_id, session_id, worker_id, question))
                 inserted = cursor.fetchone()
                 if inserted:
                     return {"turn_id": turn_id, "status": "running", "created": True}
@@ -197,18 +199,26 @@ class AgentTurnStore:
         finally:
             store.close()
 
-    def mark_interrupted(self):
+    def mark_interrupted(self, worker_id=None):
         store = OperationsStore()
         try:
             with store.conn, store.conn.cursor() as cursor:
                 cursor.execute("SELECT to_regclass('public.agent_turns')")
                 if cursor.fetchone()[0] is None:
                     return 0
-                cursor.execute("""
-                    UPDATE agent_turns
-                    SET status='interrupted',error_type='ServiceRestart',updated_at=now()
-                    WHERE status='running'
-                """)
+                _ensure_agent_turns(cursor)
+                if worker_id is None:
+                    cursor.execute("""
+                        UPDATE agent_turns
+                        SET status='interrupted',error_type='ServiceRestart',updated_at=now()
+                        WHERE status='running' AND worker_id IS NULL
+                    """)
+                else:
+                    cursor.execute("""
+                        UPDATE agent_turns
+                        SET status='interrupted',error_type='ServiceRestart',updated_at=now()
+                        WHERE status='running' AND (worker_id=%s OR worker_id IS NULL)
+                    """, (worker_id,))
                 return cursor.rowcount
         finally:
             store.close()

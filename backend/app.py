@@ -1,6 +1,8 @@
 """FastAPI application (optional REST API)"""
 import asyncio
 import json
+import os
+import socket
 import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
@@ -38,6 +40,7 @@ config = Config()
 distributed_collector = DistributedCollector(config)
 health_audit_scheduler = HealthAuditScheduler(config)
 agent_turn_tasks = set()
+agent_worker_id = os.getenv("AIOPS_INSTANCE_ID") or socket.gethostname()
 
 
 @asynccontextmanager
@@ -50,7 +53,9 @@ async def lifespan(_app):
     except Exception:
         logger.exception("Failed to recover alert audit task state")
     try:
-        interrupted = await asyncio.to_thread(AgentTurnStore().mark_interrupted)
+        interrupted = await asyncio.to_thread(
+            AgentTurnStore().mark_interrupted, agent_worker_id
+        )
         if interrupted:
             logger.warning("Marked %s interrupted Agent turn(s) after service startup", interrupted)
     except Exception:
@@ -342,7 +347,8 @@ async def stream_question(request: QuestionRequest):
     turn_store = AgentTurnStore()
     try:
         turn = await asyncio.to_thread(
-            turn_store.start, request.session_id, request.turn_id, request.question
+            turn_store.start, request.session_id, request.turn_id,
+            request.question, agent_worker_id,
         )
     except Exception as error:
         logger.exception("Failed to create Agent turn")
