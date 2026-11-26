@@ -11,6 +11,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
     def make_scheduler(self):
         return HealthAuditScheduler(SimpleNamespace(
             AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=120,
+            AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS=3600,
             AIOPS_AUTO_AUDIT_TARGETS=(None,),
             AIOPS_AUTO_REPAIR_ENABLED=False,
         ))
@@ -53,6 +54,7 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_later_target_success_does_not_hide_failure_in_same_cycle(self):
         scheduler = HealthAuditScheduler(SimpleNamespace(
             AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=120,
+            AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS=3600,
             AIOPS_AUTO_AUDIT_TARGETS=("public.failed", "public.healthy"),
             AIOPS_AUTO_REPAIR_ENABLED=False,
         ))
@@ -74,6 +76,40 @@ class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["consecutive_failures"], 1)
         self.assertEqual(status["last_error_type"], "RuntimeError")
         sleep.assert_awaited_once_with(60)
+
+    async def test_retry_backoff_is_exponential_and_capped(self):
+        scheduler = HealthAuditScheduler(SimpleNamespace(
+            AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=900,
+            AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS=180,
+            AIOPS_AUTO_AUDIT_TARGETS=(None,),
+            AIOPS_AUTO_REPAIR_ENABLED=False,
+        ))
+        scheduler._runtime_status["consecutive_failures"] = 2
+        scheduler.run_once = AsyncMock(side_effect=RuntimeError("database unavailable"))
+
+        with patch("backend.engines.health_audit_scheduler.asyncio.sleep", new=AsyncMock(
+            side_effect=asyncio.CancelledError
+        )) as sleep:
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.run_forever()
+
+        status = scheduler.runtime_status()
+        self.assertEqual(status["consecutive_failures"], 3)
+        self.assertEqual(status["state"], "failed")
+        sleep.assert_awaited_once_with(180)
+
+    async def test_successful_cycle_resets_consecutive_failures(self):
+        scheduler = self.make_scheduler()
+        scheduler._runtime_status["consecutive_failures"] = 3
+        scheduler.run_once = AsyncMock(return_value={"audit_id": "audit-1"})
+
+        with patch("backend.engines.health_audit_scheduler.asyncio.sleep", new=AsyncMock(
+            side_effect=asyncio.CancelledError
+        )):
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.run_forever()
+
+        self.assertEqual(scheduler.runtime_status()["consecutive_failures"], 0)
 
     async def test_skips_audit_when_another_instance_holds_database_lock(self):
         knowledge_base = MagicMock()

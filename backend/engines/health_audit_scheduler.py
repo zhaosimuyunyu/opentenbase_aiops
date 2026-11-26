@@ -158,7 +158,6 @@ class HealthAuditScheduler:
                     else:
                         skipped_targets.append(table or "full")
                         self._set_runtime_status(skipped_targets=list(skipped_targets))
-                        delay = min(delay, 30)
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
@@ -166,15 +165,22 @@ class HealthAuditScheduler:
                     cycle_error_type = type(error).__name__
                     self._set_runtime_status(failed_targets=list(failed_targets))
                     logger.exception("Scheduled health audit failed for %s", table)
-                    delay = min(delay, 60)
             if failed_targets:
+                failure_count = self._runtime_status["consecutive_failures"] + 1
+                retry_cap = min(
+                    self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS,
+                    max(60, getattr(self.config, "AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS", 3600)),
+                )
+                retry_delay = 60 * 2 ** min(failure_count - 1, 16)
+                delay = min(retry_cap, retry_delay)
                 self._set_runtime_status(
                     state="failed",
                     finished_at=datetime.now(timezone.utc).isoformat(),
                     last_error_type=cycle_error_type,
-                    consecutive_failures=self._runtime_status["consecutive_failures"] + 1,
+                    consecutive_failures=failure_count,
                 )
             elif skipped_targets:
+                delay = min(self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS, 30)
                 self._set_runtime_status(
                     state="skipped",
                     finished_at=datetime.now(timezone.utc).isoformat(),

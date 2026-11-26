@@ -88,6 +88,9 @@ class Config:
     AIOPS_AUTO_AUDIT_INTERVAL_SECONDS: int = max(
         60, int(os.getenv("AIOPS_AUTO_AUDIT_INTERVAL_SECONDS", "900"))
     )
+    AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS: int = max(
+        60, int(os.getenv("AIOPS_AUTO_AUDIT_RETRY_MAX_SECONDS", "3600"))
+    )
     AIOPS_AUTO_AUDIT_TABLE = os.getenv("AIOPS_AUTO_AUDIT_TABLE", "").strip() or None
     AIOPS_DATA_NODE_TABLE_LIMIT = int(os.getenv("AIOPS_DATA_NODE_TABLE_LIMIT", "200"))
     AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS = max(
