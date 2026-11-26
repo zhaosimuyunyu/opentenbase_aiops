@@ -146,6 +146,12 @@ API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 
 
 另以 3 个并发 worker 同时执行只读全量采集，3/3 为 `success` 且无采集错误，总墙钟时间 650.28 ms，各 collector 耗时为 258.02–649.21 ms。该小规模并发探测用于检查基本并发兼容，不替代具有代表性的业务并发、数据规模和持续时间测试。
 
+### 2026-11-26 周期巡检续跑与 AI 阶段耗时
+
+API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度器在上一条 scheduled 记录超过去重窗口后自然生成新记录 `78666cb2-149f-4470-bdf1-5adffec81f77`，采集状态为 `success`，没有 fallback，Prometheus 周期时间戳随之更新。该轮 collector 耗时为 330.79 ms。
+
+健康审计 evidence 现在分别记录 `collection_duration_ms` 和 `analysis_duration_ms`，并以 `aiops_health_audit_latest_collection_duration_ms`、`aiops_health_audit_latest_analysis_duration_ms` 暴露。SSE 审计 `39e50dff-921e-4e5e-8a4c-bec89b992051` 实测采集耗时 288.46 ms、AI 诊断耗时 36877.32 ms，详情 API 和 Prometheus 均回读到相同数值。该模型耗时说明完整巡检响应时长主要由 AI 阶段决定。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。

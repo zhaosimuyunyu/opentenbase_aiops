@@ -49,6 +49,7 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("'completed'", insert.args[0])
         persisted_evidence = json.loads(insert.args[1][2])
         self.assertEqual(persisted_evidence["collection_duration_ms"], 12.5)
+        self.assertGreaterEqual(persisted_evidence["analysis_duration_ms"], 0)
 
     async def test_persists_data_node_lock_blockers_in_performance_evidence(self):
         module = "backend.engines.readonly_audit_engine"

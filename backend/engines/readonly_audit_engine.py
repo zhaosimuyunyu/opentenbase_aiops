@@ -2,6 +2,7 @@ import json
 import logging
 import uuid
 import asyncio
+import time
 from openai import APIStatusError
 from ..tools.knowledge_search_tool import execute_search_knowledge
 from ..tools.lock_audit_tool import execute_get_database_locks
@@ -423,6 +424,7 @@ class ReadonlyAuditEngine:
             'audit_target': self.config.audit_target,
             'collection_status': snapshot['status'],
             'collection_duration_ms': snapshot.get('collection_duration_ms'),
+            'analysis_duration_ms': 0.0,
             'cluster_status': cluster_status,
             'performance_status': performance_status,
             'cluster': cluster,
@@ -456,7 +458,11 @@ class ReadonlyAuditEngine:
         else:
             if progress:
                 progress("diagnosing")
+            analysis_started = time.perf_counter()
             analysis = await self._diagnose_with_budget(issue, evidence)
+            evidence['analysis_duration_ms'] = round(
+                (time.perf_counter() - analysis_started) * 1000, 2
+            )
             structured = analysis.get('structured') or {}
             risk_level = structured.get('risk_level')
             if isinstance(risk_level, str):
