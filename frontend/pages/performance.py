@@ -39,12 +39,22 @@ def render_lock_analysis(db_connector, config):
     col1, col2 = st.columns([1, 5])
     with col1:
         if st.button("🔄 刷新", use_container_width=True, key="refresh_locks"):
+            st.session_state.performance_lock_requested = True
             st.rerun()
 
+    if not st.session_state.get("performance_lock_requested"):
+        st.info("点击刷新后读取当前锁状态。页面打开时不会自动扫描数据库。")
+        return
     with st.spinner("正在采集锁信息..."):
         from backend.collectors.performance import PerformanceCollector
         collector = PerformanceCollector(db_connector)
-        result = collector.collect_locks()
+        collected = collector.collect()
+        lock_info = collected.get('data', {}).get('locks', {})
+        result = {
+            'status': 'error' if lock_info.get('error') else 'success',
+            'error': lock_info.get('error'),
+            'data': {'locks': lock_info.get('all_locks', [])},
+        }
 
     if result['status'] == 'error':
         st.error(f"采集失败: {result.get('error', 'Unknown error')}")
@@ -112,15 +122,21 @@ def render_long_queries(db_connector, config):
     col1, col2, col3 = st.columns([1, 2, 3])
     with col1:
         if st.button("🔄 刷新", use_container_width=True, key="refresh_queries"):
+            st.session_state.performance_query_requested = True
             st.rerun()
 
     with col2:
         threshold = st.number_input("时间阈值（秒）", min_value=1, max_value=3600, value=10, key="query_threshold")
 
+    if not st.session_state.get("performance_query_requested"):
+        st.info("点击刷新后读取当前长查询。完整慢语句由 AI 巡检的服务端慢日志链路识别。")
+        return
     with st.spinner("正在采集查询信息..."):
         from backend.collectors.performance import PerformanceCollector
         collector = PerformanceCollector(db_connector)
-        result = collector.collect_long_queries(threshold_seconds=threshold)
+        collected = collector.collect()
+        queries = collected.get('data', {}).get('long_running_queries', [])
+        result = {'status': 'success', 'data': {'queries': queries}}
 
     if result['status'] == 'error':
         st.error(f"采集失败: {result.get('error', 'Unknown error')}")
@@ -177,15 +193,21 @@ def render_table_statistics(db_connector, config):
     col1, col2, col3 = st.columns([1, 2, 3])
     with col1:
         if st.button("🔄 刷新", use_container_width=True, key="refresh_stats"):
+            st.session_state.performance_stats_requested = True
             st.rerun()
 
     with col2:
         limit = st.number_input("显示表数量", min_value=10, max_value=500, value=50, key="table_limit")
 
+    if not st.session_state.get("performance_stats_requested"):
+        st.info("点击刷新后读取表统计信息。")
+        return
     with st.spinner("正在采集表统计信息..."):
         from backend.collectors.performance import PerformanceCollector
         collector = PerformanceCollector(db_connector)
-        result = collector.collect_table_stats(limit=limit)
+        collected = collector.collect()
+        tables = collected.get('data', {}).get('table_stats', [])[:int(limit)]
+        result = {'status': 'success', 'data': {'tables': tables}}
 
     if result['status'] == 'error':
         st.error(f"采集失败: {result.get('error', 'Unknown error')}")
