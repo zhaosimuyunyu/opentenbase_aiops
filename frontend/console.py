@@ -100,6 +100,8 @@ def go(page):
 
 
 st.session_state.setdefault("page", "overview")
+st.session_state.setdefault("agent_sessions", {})
+st.session_state.setdefault("active_agent_session", None)
 with st.sidebar:
     st.markdown('<div class="brand"><div class="brand-mark">OTB</div><div><div class="brand-name">OpenTenBase</div><div class="brand-sub">AIOps 运维控制台</div></div></div>', unsafe_allow_html=True)
     st.markdown('<div class="nav-label">监控与诊断</div>', unsafe_allow_html=True)
@@ -254,7 +256,7 @@ if st.session_state.page == "overview":
                 pass
         with right:
             st.markdown('<div class="section"><h3>连接分布</h3><span>当前 CN 客户端会话</span></div>', unsafe_allow_html=True)
-            st.dataframe(conn.get("by_database", []), use_container_width=True, hide_index=True)
+            st.table(conn.get("by_database", []))
 
 elif st.session_state.page == "audit":
     automation = api_json("/api/automation/status")
@@ -285,7 +287,7 @@ elif st.session_state.page == "history":
     items = api_json("/api/audits", params={"limit": 50, "risk": risk, "table": table or None, "database": database or None}).get("items", [])
     if items:
         rows = [{"时间": item.get("created_at"), "类型": item.get("audit_type"), "风险": str(item.get("risk_level", "unknown")).upper(), "采集": item.get("collection_status"), "发现": item.get("finding_count"), "引用": item.get("reference_count"), "审计 ID": item.get("audit_id")} for item in items]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.table(rows)
         options = {f"{item.get('created_at')} · {str(item.get('risk_level', 'unknown')).upper()} · {item.get('audit_id')}": item.get("audit_id") for item in items}
         selected = options[st.selectbox("打开一条审计", list(options))]
         show_latest_ai(api_json(f"/api/audits/{selected}"))
@@ -309,32 +311,67 @@ elif st.session_state.page == "repairs":
         st.success("当前没有待处理处置请求")
 
 elif st.session_state.page == "agent":
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if not st.session_state.messages:
+    sessions = st.session_state.agent_sessions
+    if not sessions:
+        session_id = "session-1"
+        sessions[session_id] = {"title": "新会话", "messages": []}
+        st.session_state.active_agent_session = session_id
+    if st.session_state.active_agent_session not in sessions:
+        st.session_state.active_agent_session = next(iter(sessions))
+    session_id = st.session_state.active_agent_session
+    active_session = sessions[session_id]
+    session_toolbar = st.columns([3, 1, 1])
+    with session_toolbar[0]:
+        session_options = list(sessions)
+        selected_session = st.selectbox(
+            "会话", session_options,
+            index=session_options.index(session_id),
+            format_func=lambda item: sessions[item]["title"],
+            label_visibility="collapsed",
+        )
+        if selected_session != session_id:
+            st.session_state.active_agent_session = selected_session
+            st.rerun()
+    with session_toolbar[1]:
+        if st.button("新建会话", use_container_width=True, key="new-agent-session"):
+            new_id = f"session-{len(sessions) + 1}"
+            sessions[new_id] = {"title": "新会话", "messages": []}
+            st.session_state.active_agent_session = new_id
+            st.rerun()
+    with session_toolbar[2]:
+        if st.button("删除当前", use_container_width=True, key="delete-agent-session") and len(sessions) > 1:
+            del sessions[session_id]
+            st.session_state.active_agent_session = next(iter(sessions))
+            st.rerun()
+
+    active_messages = active_session["messages"]
+    if not active_messages:
         st.markdown("#### 从一个运维问题开始")
         st.caption("Agent 会按需调用集群诊断、锁检查、知识库和 SQL 工具。")
-    for message in st.session_state.messages:
+    for message in active_messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message.get("trace"):
                 with st.expander("工具调用记录"):
                     st.json(message["trace"])
     if prompt := st.chat_input("描述异常，或直接提出要检查的数据库问题…"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        active_messages.append({"role": "user", "content": prompt})
+        if active_session["title"] == "新会话":
+            active_session["title"] = prompt[:24] + ("…" if len(prompt) > 24 else "")
         with st.chat_message("user"):
             st.markdown(prompt)
         try:
-            history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
+            history = [{"role": m["role"], "content": m["content"]} for m in active_messages[:-1]]
             response = requests.post(f"{API}/api/qa/ask", json={"question": prompt, "history": history}, timeout=900)
             response.raise_for_status()
             result = response.json()
             with st.chat_message("assistant"):
                 st.markdown(result.get("answer", ""))
-            st.session_state.messages.append({"role": "assistant", "content": result.get("answer", ""), "trace": result.get("tool_trace")})
+            active_messages.append({"role": "assistant", "content": result.get("answer", ""), "trace": result.get("tool_trace")})
             st.rerun()
         except Exception as error:
             st.error(str(error))
+            active_messages.pop()
 
 elif st.session_state.page == "performance":
     tabs = st.tabs(["锁等待", "长查询", "表统计"])
@@ -344,16 +381,16 @@ elif st.session_state.page == "performance":
             locks = result.get("locks", {})
             st.columns(2)[0].metric("总锁数", locks.get("total_locks", 0))
             st.columns(2)[1].metric("阻塞锁", locks.get("blocked_count", 0))
-            st.dataframe(locks.get("blocking_locks", []), use_container_width=True, hide_index=True)
+            st.table(locks.get("blocking_locks", []))
     with tabs[1]:
         st.caption("当前实例的活动视图可能在长查询期间返回 idle；完整语句会在服务端慢日志进入 AI 巡检。")
         if st.button("查询长查询", type="primary"):
             result = PerformanceCollector(st.session_state.db, config).collect().get("data", {})
-            st.dataframe(result.get("long_running_queries", []), use_container_width=True, hide_index=True)
+            st.table(result.get("long_running_queries", []))
     with tabs[2]:
         if st.button("查询表统计", type="primary"):
             result = PerformanceCollector(st.session_state.db, config).collect().get("data", {})
-            st.dataframe(result.get("table_stats", []), use_container_width=True, hide_index=True)
+            st.table(result.get("table_stats", []))
 
 elif st.session_state.page == "sql":
     templates = {"选择模板": "", "查看连接": "SELECT datname, state, count(*) AS sessions FROM pg_catalog.pg_stat_activity GROUP BY datname, state ORDER BY sessions DESC;", "查看活动会话": "SELECT pid, usename, datname, application_name, state, wait_event_type, wait_event FROM pg_catalog.pg_stat_activity WHERE backend_type = 'client backend' ORDER BY state, pid;", "查看表统计": "SELECT schemaname, relname, n_live_tup, n_dead_tup FROM pg_catalog.pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 20;"}
@@ -369,7 +406,7 @@ elif st.session_state.page == "sql":
             report = response.json()
             st.metric("风险等级", {"critical": "严重", "high": "高", "medium": "中", "low": "低"}.get(report.get("risk_level"), "未知"))
             if report.get("findings"):
-                st.dataframe(report["findings"], use_container_width=True, hide_index=True)
+                st.table(report["findings"])
             if report.get("explain") is not None:
                 st.json(report["explain"])
             if report.get("explain_error"):
