@@ -285,6 +285,27 @@ class RepairClaimTests(unittest.TestCase):
         self.assertEqual(result, {"status": "skipped", "reason": "automatic_repair_disabled"})
         store.assert_not_called()
 
+    def test_verified_analyze_outcome_is_saved_to_operational_memory(self):
+        workflow = RepairWorkflow()
+        result = {
+            "success": True,
+            "postcondition": {"verified": True, "advanced_nodes": ["dn1", "dn2"]},
+            "precondition": {"stale_nodes": ["dn1", "dn2"]},
+        }
+        with patch("backend.engines.repair_workflow.OperationalMemory") as memory_type:
+            workflow._save_analyze_memory(
+                audit_id="audit-1", table="public.orders",
+                evidence={"observation": {"stale_nodes": ["dn1"]}},
+                result=result, status="executed", request_id="request-1",
+            )
+
+        memory_type.return_value.save_case.assert_called_once()
+        saved = memory_type.return_value.save_case.call_args.kwargs
+        self.assertEqual(saved["evidence"]["audit_id"], "audit-1")
+        self.assertEqual(saved["verification_result"]["verified"], True)
+        self.assertEqual(saved["effectiveness"], 1.0)
+        memory_type.return_value.close.assert_called_once()
+
     def test_automatic_repair_skips_manual_or_incomplete_audits(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(

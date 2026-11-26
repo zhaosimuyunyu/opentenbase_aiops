@@ -48,6 +48,24 @@ class RepairWorkflow:
     def __init__(self, config=None):
         self.config = config or Config()
 
+    @staticmethod
+    def _save_analyze_memory(*, audit_id, table, evidence, result, status, request_id):
+        memory = OperationalMemory()
+        try:
+            observation = (evidence or {}).get("observation") or {}
+            memory.save_case(
+                category="stale_table_statistics",
+                symptoms=f"Stale statistics on {table}",
+                evidence={"audit_id": audit_id, "precondition": result.get("precondition") or observation},
+                root_cause="Optimizer statistics were stale on one or more data nodes.",
+                solution=f"ANALYZE {table}",
+                execution_result={"status": status, "request_id": request_id, "result": result},
+                verification_result=result.get("postcondition") or {"verified": False},
+                effectiveness=1.0 if status == "executed" else 0.0,
+            )
+        finally:
+            memory.close()
+
     def _ensure_schema(self, kb):
         with kb.conn, kb.conn.cursor() as cur:
             cur.execute("""
@@ -1029,25 +1047,13 @@ class RepairWorkflow:
                     status=status, event_data=result,
                 )
                 if operation == "analyze_table":
-                    memory = None
                     try:
-                        observation = ((request.get("evidence") or {}).get("observation") or {})
-                        memory = OperationalMemory()
-                        memory.save_case(
-                            category="stale_table_statistics",
-                            symptoms=(request.get("reason") or f"Stale statistics on {table}"),
-                            evidence={"audit_id": row[3], "precondition": result.get("precondition") or observation},
-                            root_cause="Optimizer statistics were stale on one or more data nodes.",
-                            solution=f"ANALYZE {table}",
-                            execution_result={"status": status, "request_id": request_id, "result": result},
-                            verification_result=result.get("postcondition") or {"verified": False},
-                            effectiveness=1.0 if status == "executed" else 0.0,
+                        self._save_analyze_memory(
+                            audit_id=row[3], table=table, evidence=reviews,
+                            result=result, status=status, request_id=request_id,
                         )
                     except Exception:
                         logger.exception("Could not save verified ANALYZE outcome to operational memory")
-                    finally:
-                        if memory is not None:
-                            memory.close()
                 return {"request_id": request_id, "status": status, "result": result}
         finally:
             kb.close()
