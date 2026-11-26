@@ -116,14 +116,19 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
             "status": "success", "errors": {},
             "checks": {
                 "locks": [{"granted": False, "transactionid": "42"}],
+                "nodes": [
+                    {"node_name": "dn0001", "node_type": "D"},
+                    {"node_name": "dn0002", "node_type": "D"},
+                ],
                 "prepared_transactions": [{"transaction_id": "42", "gid": "g", "database": "postgres"}],
+                "data_node_prepared_transactions": [],
                 "pg_clean_diagnostics": [{
                     "registered": False, "record_list_registered": False,
                     "package_available": False,
                 }],
             },
         }
-        with patch(f"{module}.OperationsStore"), patch(
+        with patch(f"{module}.OperationsStore") as store, patch(
             f"{module}.ReadonlyHealthCollector"
         ) as collector, patch.object(
             ReadonlyAuditEngine, "_diagnose",
@@ -133,6 +138,79 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
             result = await ReadonlyAuditEngine().run_health_audit()
         checks = [item["check"] for item in result["findings"]]
         self.assertIn("official_2pc_record_diagnostics_unavailable", checks)
+        blocker = next(
+            item for item in result["findings"]
+            if item["check"] == "prepared_transaction_blocker"
+        )
+        self.assertEqual(blocker["severity"], "high")
+        self.assertEqual(blocker["evidence"][0]["data_node_participants"], [])
+        self.assertEqual(blocker["evidence"][0]["data_node_participant_status"], "no_matching_records")
+        self.assertEqual(blocker["evidence"][0]["data_node_participant_count"], 0)
+        self.assertEqual(result["risk_level"], "high")
+        inserts = " ".join(
+            call.args[0] for call in store.return_value.conn.cursor.return_value
+            .__enter__.return_value.execute.call_args_list
+        )
+        self.assertNotIn("repair_requests", inserts)
+
+    async def test_correlates_prepared_transaction_by_gid_across_nodes(self):
+        module = "backend.engines.readonly_audit_engine"
+        gid = "_$XC$21973:cn0001:T:2:1"
+        snapshot = {
+            "status": "success", "errors": {},
+            "checks": {
+                "locks": [{
+                    "granted": False, "locktype": "transactionid",
+                    "transactionid": "21973", "pid": 3036,
+                }],
+                "nodes": [
+                    {"node_name": "dn0001", "node_type": "D"},
+                    {"node_name": "dn0002", "node_type": "D"},
+                ],
+                "prepared_transactions": [{
+                    "transaction_id": "21973", "gid": gid,
+                    "database": "postgres", "owner": "opentenbase",
+                }],
+                "data_node_prepared_transactions": [
+                    {"node_name": "dn0001", "transaction_id": "11576", "gid": gid},
+                    {"node_name": "dn0002", "transaction_id": "11457", "gid": gid},
+                ],
+                "pg_clean_diagnostics": [{"record_list_registered": True}],
+                "pg_clean_transaction_diagnostics": [],
+            },
+        }
+        with patch(f"{module}.OperationsStore") as store, patch(
+            f"{module}.ReadonlyHealthCollector"
+        ) as collector, patch.object(
+            ReadonlyAuditEngine, "_diagnose",
+            new=AsyncMock(return_value={
+                "structured": {"risk_level": "low"}, "knowledge_refs": [],
+            }),
+        ):
+            collector.return_value.collect.return_value = snapshot
+            result = await ReadonlyAuditEngine().run_health_audit(trigger="scheduled")
+
+        finding = next(
+            item for item in result["findings"]
+            if item["check"] == "prepared_transaction_blocker"
+        )
+        correlated = finding["evidence"][0]
+        self.assertEqual(correlated["transaction_id"], "21973")
+        self.assertEqual(correlated["gid"], gid)
+        self.assertEqual(
+            [(item["node_name"], item["transaction_id"])
+             for item in correlated["data_node_participants"]],
+            [("dn0001", "11576"), ("dn0002", "11457")],
+        )
+        self.assertEqual(correlated["data_node_participant_status"], "matched")
+        self.assertEqual(correlated["data_node_participant_count"], 2)
+        self.assertEqual(result["risk_level"], "high")
+        inserted_sql = " ".join(
+            call.args[0] for call in store.return_value.conn.cursor.return_value
+            .__enter__.return_value.execute.call_args_list
+        )
+        self.assertIn("INSERT INTO audit_records", inserted_sql)
+        self.assertNotIn("repair_requests", inserted_sql)
 
     async def test_lock_finding_notes_missing_official_unlock_diagnostics(self):
         module = "backend.engines.readonly_audit_engine"

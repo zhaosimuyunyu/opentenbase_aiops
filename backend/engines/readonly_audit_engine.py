@@ -262,6 +262,14 @@ class ReadonlyAuditEngine:
         pg_clean_results = checks.get('pg_clean_transaction_diagnostics') or []
         for transaction in checks.get('data_node_prepared_transactions') or []:
             prepared_by_gid.setdefault(transaction.get('gid'), []).append(transaction)
+        data_nodes = [
+            node for node in checks.get('nodes') or []
+            if node.get('node_type') == 'D'
+        ]
+        data_node_prepared_errors = [
+            name for name in snapshot['errors']
+            if name.startswith('data_node_prepared_transactions:')
+        ]
         blocked_gids = {
             gid for gid, participants in prepared_by_gid.items()
             if any(participant.get('waiting_pids') for participant in participants)
@@ -273,9 +281,24 @@ class ReadonlyAuditEngine:
         ]
         coordinator_gids = {transaction.get('gid') for transaction in matching_prepared}
         for transaction in matching_prepared:
-            transaction['data_node_participants'] = prepared_by_gid.get(
-                transaction.get('gid'), []
-            )
+            participants = prepared_by_gid.get(transaction.get('gid'), [])
+            if 'nodes' not in checks:
+                participant_status = 'topology_unavailable'
+            elif not data_nodes:
+                participant_status = 'no_data_nodes'
+            elif data_node_prepared_errors:
+                participant_status = 'incomplete'
+            elif participants:
+                participant_status = 'matched'
+            else:
+                participant_status = 'no_matching_records'
+            transaction['data_node_participants'] = participants
+            transaction['data_node_participant_status'] = participant_status
+            transaction['data_node_participant_count'] = len(participants)
+            transaction['data_node_participant_nodes'] = sorted({
+                participant.get('node_name') for participant in participants
+                if participant.get('node_name')
+            })
             transaction['official_diagnostics'] = [
                 row for row in pg_clean_results if row.get('gid') == transaction.get('gid')
             ]
@@ -288,7 +311,18 @@ class ReadonlyAuditEngine:
         for gid in blocked_gids - coordinator_gids:
             participants = prepared_by_gid[gid]
             waiting = next(node for node in participants if node.get('waiting_pids'))
-            matching_prepared.append({**waiting, 'data_node_participants': participants})
+            matching_prepared.append({
+                **waiting,
+                'data_node_participants': participants,
+                'data_node_participant_status': (
+                    'incomplete' if data_node_prepared_errors else 'matched'
+                ),
+                'data_node_participant_count': len(participants),
+                'data_node_participant_nodes': sorted({
+                    participant.get('node_name') for participant in participants
+                    if participant.get('node_name')
+                }),
+            })
         if matching_prepared:
             databases = sorted({
                 transaction['database'] for transaction in matching_prepared
