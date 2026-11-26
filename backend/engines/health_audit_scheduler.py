@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from psycopg2.extras import Json
 from starlette.concurrency import run_in_threadpool
 
@@ -17,6 +18,21 @@ class HealthAuditScheduler:
     def __init__(self, config=None):
         self.config = config or Config()
         self._run_lock = asyncio.Lock()
+        self._runtime_status = {
+            "state": "idle",
+            "target": None,
+            "started_at": None,
+            "finished_at": None,
+            "next_retry_at": None,
+            "last_error_type": None,
+            "consecutive_failures": 0,
+        }
+
+    def runtime_status(self):
+        return dict(self._runtime_status)
+
+    def _set_runtime_status(self, **updates):
+        self._runtime_status.update(updates)
 
     async def run_once(self, *, scheduled=False, table=None, progress=None,
                        trigger=None, trigger_context=None):
@@ -90,6 +106,13 @@ class HealthAuditScheduler:
         while True:
             delay = self.config.AIOPS_AUTO_AUDIT_INTERVAL_SECONDS
             for table in self.config.AIOPS_AUTO_AUDIT_TARGETS:
+                self._set_runtime_status(
+                    state="running",
+                    target=table or "full",
+                    started_at=datetime.now(timezone.utc).isoformat(),
+                    finished_at=None,
+                    next_retry_at=None,
+                )
                 try:
                     result = await self.run_once(scheduled=True, table=table)
                     if result:
@@ -120,13 +143,33 @@ class HealthAuditScheduler:
                                     "Could not persist automatic repair result for audit %s",
                                     result["audit_id"],
                                 )
+                        self._set_runtime_status(
+                            state="completed",
+                            finished_at=datetime.now(timezone.utc).isoformat(),
+                            last_error_type=None,
+                            consecutive_failures=0,
+                        )
                     else:
+                        self._set_runtime_status(
+                            state="skipped",
+                            finished_at=datetime.now(timezone.utc).isoformat(),
+                        )
                         delay = min(delay, 30)
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except Exception as error:
+                    failure_count = self._runtime_status["consecutive_failures"] + 1
+                    self._set_runtime_status(
+                        state="failed",
+                        finished_at=datetime.now(timezone.utc).isoformat(),
+                        last_error_type=type(error).__name__,
+                        consecutive_failures=failure_count,
+                    )
                     logger.exception("Scheduled health audit failed for %s", table)
                     delay = min(delay, 60)
+            self._set_runtime_status(
+                next_retry_at=(datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+            )
             await asyncio.sleep(delay)
 
     @staticmethod

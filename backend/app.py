@@ -3,6 +3,7 @@ import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -616,6 +617,7 @@ def get_automation_status():
             "latest_scheduled_at": latest_scheduled_at,
             "latest_scheduled_collection_status": latest_scheduled_collection_status,
             "scheduled_targets": scheduled_targets,
+            "scheduler_runtime": health_audit_scheduler.runtime_status(),
             "repair_review_count": repair_review_count,
         }
     except Exception as error:
@@ -675,6 +677,7 @@ def audit_metrics():
     status = get_automation_status()
     latest = status["latest_audit"]
     scheduled = status["latest_scheduled_at"]
+    scheduler_runtime = status["scheduler_runtime"]
     risk = latest["risk_level"] if latest else None
     levels = ("low", "medium", "high", "critical", "unknown")
     if latest and risk not in levels:
@@ -682,6 +685,14 @@ def audit_metrics():
     metrics = [
         "# TYPE aiops_health_audit_schedule_enabled gauge",
         f"aiops_health_audit_schedule_enabled {int(status['automatic_health_audit_enabled'])}",
+        "# TYPE aiops_health_audit_scheduler_running gauge",
+        f"aiops_health_audit_scheduler_running {int(scheduler_runtime['state'] == 'running')}",
+        "# TYPE aiops_health_audit_scheduler_consecutive_failures gauge",
+        f"aiops_health_audit_scheduler_consecutive_failures {scheduler_runtime['consecutive_failures']}",
+        "# TYPE aiops_health_audit_scheduler_started_timestamp_seconds gauge",
+        f"aiops_health_audit_scheduler_started_timestamp_seconds {datetime.fromisoformat(scheduler_runtime['started_at']).timestamp() if scheduler_runtime['started_at'] else 0}",
+        "# TYPE aiops_health_audit_scheduler_next_retry_timestamp_seconds gauge",
+        f"aiops_health_audit_scheduler_next_retry_timestamp_seconds {datetime.fromisoformat(scheduler_runtime['next_retry_at']).timestamp() if scheduler_runtime['next_retry_at'] else 0}",
         "# TYPE aiops_health_audit_interval_seconds gauge",
         f"aiops_health_audit_interval_seconds {status['interval_seconds']}",
         "# TYPE aiops_health_audit_latest_timestamp_seconds gauge",

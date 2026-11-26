@@ -14,6 +14,13 @@ groups:
         for: 2m
         annotations:
           summary: "OpenTenBase health audit is overdue"
+      - alert: OpenTenBaseAuditSchedulerFailed
+        expr: |
+          aiops_health_audit_scheduler_consecutive_failures{job="opentenbase-aiops"} > 0
+          and aiops_health_audit_schedule_enabled{job="opentenbase-aiops"} == 1
+        for: 1m
+        annotations:
+          summary: "OpenTenBase scheduled health audit is failing and will retry"
       - alert: OpenTenBaseAuditMetricsUnavailable
         expr: up{job="opentenbase-aiops"} == 0
         for: 2m

@@ -1,10 +1,55 @@
+import asyncio
 import unittest
+from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.engines.health_audit_scheduler import HealthAuditScheduler
 
 
 class HealthAuditSchedulerTests(unittest.IsolatedAsyncioTestCase):
+    def make_scheduler(self):
+        return HealthAuditScheduler(SimpleNamespace(
+            AIOPS_AUTO_AUDIT_INTERVAL_SECONDS=120,
+            AIOPS_AUTO_AUDIT_TARGETS=(None,),
+            AIOPS_AUTO_REPAIR_ENABLED=False,
+        ))
+
+    async def test_runtime_status_tracks_successful_scheduled_audit(self):
+        scheduler = self.make_scheduler()
+        scheduler.run_once = AsyncMock(return_value={"audit_id": "audit-1"})
+
+        with patch("backend.engines.health_audit_scheduler.asyncio.sleep", new=AsyncMock(
+            side_effect=asyncio.CancelledError
+        )):
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.run_forever()
+
+        status = scheduler.runtime_status()
+        self.assertEqual(status["state"], "completed")
+        self.assertEqual(status["target"], "full")
+        self.assertIsNotNone(datetime.fromisoformat(status["started_at"]))
+        self.assertIsNotNone(datetime.fromisoformat(status["finished_at"]))
+        self.assertIsNotNone(datetime.fromisoformat(status["next_retry_at"]))
+        self.assertEqual(status["consecutive_failures"], 0)
+        scheduler.run_once.assert_awaited_once_with(scheduled=True, table=None)
+
+    async def test_runtime_status_records_failure_and_retry_time(self):
+        scheduler = self.make_scheduler()
+        scheduler.run_once = AsyncMock(side_effect=RuntimeError("database unavailable"))
+
+        with patch("backend.engines.health_audit_scheduler.asyncio.sleep", new=AsyncMock(
+            side_effect=asyncio.CancelledError
+        )):
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.run_forever()
+
+        status = scheduler.runtime_status()
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(status["last_error_type"], "RuntimeError")
+        self.assertEqual(status["consecutive_failures"], 1)
+        self.assertIsNotNone(datetime.fromisoformat(status["next_retry_at"]))
+
     async def test_skips_audit_when_another_instance_holds_database_lock(self):
         knowledge_base = MagicMock()
         knowledge_base.conn.closed = False
