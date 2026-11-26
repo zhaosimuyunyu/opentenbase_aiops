@@ -280,16 +280,35 @@ class AIOpsAgent:
         tool_trace = []
         round_number = 0
         final = first
-        remaining_calls = MAX_KNOWLEDGE_TOOL_CALLS + MAX_DIAGNOSTIC_TOOL_CALLS
-        while getattr(final, 'tool_calls', None) and remaining_calls:
+        total_calls = 0
+        max_total_calls = MAX_KNOWLEDGE_TOOL_CALLS + MAX_DIAGNOSTIC_TOOL_CALLS
+        knowledge_calls = 0
+        diagnostic_calls = 0
+        while getattr(final, 'tool_calls', None) and total_calls < max_total_calls and (
+            knowledge_calls < MAX_KNOWLEDGE_TOOL_CALLS
+            or diagnostic_calls < MAX_DIAGNOSTIC_TOOL_CALLS
+        ):
             round_number += 1
-            selected_calls = final.tool_calls[:remaining_calls]
-            remaining_calls -= len(selected_calls)
-            if len(final.tool_calls) > len(selected_calls):
-                tool_errors.append('KnowledgeToolCallLimit')
+            allowed_calls = set()
+            for call in final.tool_calls:
+                total_calls += 1
+                name = call.function.name
+                if total_calls > max_total_calls:
+                    tool_errors.append('DiagnosticToolCallLimit')
+                elif name == 'search_knowledge' and knowledge_calls < MAX_KNOWLEDGE_TOOL_CALLS:
+                    knowledge_calls += 1
+                    allowed_calls.add(call.id)
+                elif name == 'get_database_locks' and diagnostic_calls < MAX_DIAGNOSTIC_TOOL_CALLS:
+                    diagnostic_calls += 1
+                    allowed_calls.add(call.id)
+                else:
+                    tool_errors.append(
+                        'KnowledgeToolCallLimit' if name == 'search_knowledge'
+                        else 'DiagnosticToolCallLimit'
+                    )
             assistant_message = {'role': 'assistant', 'content': final.content or ''}
             tool_calls = []
-            for call in selected_calls:
+            for call in final.tool_calls:
                 tool_calls.append({
                     'id': call.id,
                     'type': 'function',
@@ -300,7 +319,22 @@ class AIOpsAgent:
                 })
             assistant_message['tool_calls'] = tool_calls
             messages.append(assistant_message)
-            for call in selected_calls:
+            for call in final.tool_calls:
+                name = call.function.name
+                if call.id not in allowed_calls:
+                    messages.append({
+                        'role': 'tool', 'tool_call_id': call.id,
+                        'content': json.dumps(
+                            {'error': 'Tool call limit reached'}, ensure_ascii=False
+                        ),
+                    })
+                    tool_trace.append({
+                        'round': round_number,
+                        'tool': name if name in TOOL_HANDLERS else 'unknown',
+                        'hits': 0,
+                        'failed': True,
+                    })
+                    continue
                 try:
                     handler = {
                         "search_knowledge": execute_search_knowledge,
@@ -319,7 +353,7 @@ class AIOpsAgent:
                 refs.extend(result.get('results', []))
                 tool_trace.append({
                     'round': round_number,
-                    'tool': call.function.name if call.function.name in TOOL_HANDLERS else 'unknown',
+                    'tool': name if name in TOOL_HANDLERS else 'unknown',
                     'hits': len(result.get('results', [])),
                     'failed': 'error' in result,
                 })
@@ -328,7 +362,13 @@ class AIOpsAgent:
                     'content': json.dumps(result, ensure_ascii=False, default=str),
                 })
             try:
-                options = {'tools': TOOL_SCHEMAS, 'tool_choice': 'auto'} if remaining_calls else {}
+                calls_remaining = (
+                    total_calls < max_total_calls
+                    and (knowledge_calls < MAX_KNOWLEDGE_TOOL_CALLS
+                    or diagnostic_calls < MAX_DIAGNOSTIC_TOOL_CALLS
+                    )
+                )
+                options = {'tools': TOOL_SCHEMAS, 'tool_choice': 'auto'} if calls_remaining else {}
                 final = _completion_message(await self._create_completion(
                     model=self.model, messages=messages, **options
                 ))

@@ -237,6 +237,37 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(report["structured"]["analysis_source"], "model")
 
+    async def test_knowledge_search_call_limit_is_enforced_per_tool(self):
+        agent = AIOpsAgent(SimpleNamespace(
+            DEEPSEEK_API_KEY="fixture-key",
+            DEEPSEEK_API_BASE="https://example.invalid/v1",
+            DEEPSEEK_TIMEOUT_SECONDS=1,
+            DEEPSEEK_MODEL="fixture-model",
+        ))
+        self.addCleanup(agent.client.close)
+        calls = [SimpleNamespace(
+            id=f"search-{index}",
+            function=SimpleNamespace(
+                name="search_knowledge", arguments=f'{{"query":"query {index}"}}'
+            ),
+        ) for index in range(4)]
+        first = SimpleNamespace(content=None, tool_calls=calls)
+        final = SimpleNamespace(
+            content='{"root_cause":"Prepared transaction blocks two sessions",'
+                    '"risk_level":"high","evidence":[],"recommendations":[]}',
+            tool_calls=[],
+        )
+        search = AsyncMock(return_value={"results": [{"source_url": "https://example.invalid/doc"}]})
+        with patch.object(agent.client.chat.completions, "create", Mock(side_effect=[
+            SimpleNamespace(choices=[SimpleNamespace(message=first)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=final)]),
+        ])), patch("backend.ai.agent_client.execute_search_knowledge", search):
+            report = await agent.diagnose("Review locks", {})
+
+        self.assertEqual(search.await_count, 3)
+        self.assertEqual(sum(item["failed"] for item in report["tool_trace"]), 1)
+        self.assertIn("KnowledgeToolCallLimit", report["tool_errors"])
+
     async def test_invalid_report_preserves_retrieved_references(self):
         await self._check_failed_report(
             [SimpleNamespace(message=SimpleNamespace(content='{"risk_level":"high"}'))],
