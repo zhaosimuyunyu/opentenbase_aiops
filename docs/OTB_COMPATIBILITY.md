@@ -173,6 +173,13 @@ Operational memory 当前查询为空是预期结果，因为现场没有配置�
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。
 
 健康巡检采集到真实锁等待，并识别出与 XID `21973` 匹配的 prepared transaction。AI 分析阶段还修复了 DeepSeek OpenAI 兼容接口对空 `function_call` 字段的 422 错误。
+
+### 2026-11-27 现场状态复核
+
+02:52 +08:00 的真实全量只读巡检 `36398a2a-f1fb-489a-87c7-d0020694f9c9` 状态为 `completed`，采集状态为 `success`，采集错误为空。CN 仍有 prepared XID `21973`（GID `_$XC$21973:cn0001:T:2:1`）及两个等待该 XID 的会话。该次巡检和随后从 CN 分别执行的只读 `EXECUTE DIRECT` 查询均未在 DN1、DN2 发现对应 GID 的 prepared 记录；DN 锁等待关系为 0。结构化发现记录 `data_node_participant_status=no_matching_records`，表示已成功采集 DN、但没有匹配记录，不代表采集失败。
+
+同一轮巡检从两个 DN 成功取得 27 条表统计、76 条索引统计和 52 条存储记录，错误数为 0。此前记录的 DN 本地 prepared 事务和目录扫描锁超时属于较早观测，不能据此判断当前 DN 状态。CN 上 prepared 事务与等待者的根因关联仍未由官方 `pg_unlock` / `pg_clean` 诊断接口交叉验证，不能据此自动提交或回滚事务。
+
 ### 数据节点目录分段复测
 
 在当前实验集群上，通过 CN 对 DN1 和 DN2 执行相同的只读 `pg_class` 计数查询。查询限定普通表（`relkind = 'r'`），锁超时为 300 ms，语句超时为 2 秒。
