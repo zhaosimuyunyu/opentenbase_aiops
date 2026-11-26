@@ -85,8 +85,22 @@ class AgentTurnStore:
                 cursor.execute("""
                     INSERT INTO agent_turns(turn_id,session_id,question,status)
                     VALUES(%s,%s,%s,'running')
+                    ON CONFLICT(turn_id) DO NOTHING
+                    RETURNING turn_id
                 """, (turn_id, session_id, question))
-            return {"turn_id": turn_id, "status": "running", "created": True}
+                inserted = cursor.fetchone()
+                if inserted:
+                    return {"turn_id": turn_id, "status": "running", "created": True}
+                cursor.execute(
+                    "SELECT status FROM agent_turns WHERE turn_id=%s",
+                    (turn_id,),
+                )
+                existing = cursor.fetchone()
+            return {
+                "turn_id": turn_id,
+                "status": existing[0] if existing else "running",
+                "created": False,
+            }
         finally:
             store.close()
 

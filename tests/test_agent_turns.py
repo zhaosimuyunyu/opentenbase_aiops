@@ -11,6 +11,7 @@ class AgentTurnStoreTests(unittest.TestCase):
         cursor.fetchone.side_effect = [
             None,
             ("session title", [{"role": "user", "content": "inspect", "turn_id": "turn-1"}]),
+            ("turn-1",),
         ]
         with patch("backend.engines.agent_turns.OperationsStore", return_value=store):
             result = AgentTurnStore().start("session-1", "turn-1", "inspect")
@@ -28,7 +29,7 @@ class AgentTurnStoreTests(unittest.TestCase):
     def test_start_returns_existing_turn_without_adding_another(self):
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value
-        cursor.fetchone.return_value = ("running",)
+        cursor.fetchone.side_effect = [("running",)]
         with patch("backend.engines.agent_turns.OperationsStore", return_value=store):
             result = AgentTurnStore().start("session-1", "turn-1", "inspect")
 
@@ -36,6 +37,27 @@ class AgentTurnStoreTests(unittest.TestCase):
             "turn_id": "turn-1", "status": "running", "created": False,
         })
         self.assertEqual(cursor.execute.call_count, 3)
+
+    def test_concurrent_start_conflict_returns_existing_turn(self):
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [
+            None,
+            ("session title", []),
+            None,
+            ("running",),
+        ]
+        with patch("backend.engines.agent_turns.OperationsStore", return_value=store):
+            result = AgentTurnStore().start("session-1", "turn-1", "inspect")
+
+        self.assertEqual(result, {
+            "turn_id": "turn-1", "status": "running", "created": False,
+        })
+        insert_call = next(
+            call for call in cursor.execute.call_args_list
+            if "INSERT INTO agent_turns" in call.args[0]
+        )
+        self.assertIn("ON CONFLICT(turn_id) DO NOTHING", insert_call.args[0])
 
     def test_complete_persists_answer_and_session_message_in_one_transaction(self):
         store = MagicMock()
