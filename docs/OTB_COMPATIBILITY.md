@@ -164,6 +164,8 @@ API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度�
 
 已在真实 metadata PostgreSQL 上验证写入并由新 scheduler 实例恢复 `failed`、错误类型、连续失败数和目标列表，随后恢复了原状态/清理测试记录；API 进程内 scheduler 状态保持不变。
 
+2026-11-27 又观察到真实自动巡检 `f1a96eb4-5a54-4ca3-93b2-71493662caa5` 完成并持久化 `completed`、目标 `full`、失败数 0 和下次运行时间。重启 API 后状态返回 `restored_from_store=true`，保留原 `next_retry_at`，未立即重复巡检；OpenTenBase 与 metadata readiness 均为 ready。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。
