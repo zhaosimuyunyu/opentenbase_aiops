@@ -143,7 +143,7 @@ class AIOpsAgent:
             },
         }
 
-    async def chat(self, question, history=None):
+    async def chat(self, question, history=None, event_callback=None):
         """Interactive multi-turn agent with live diagnostics, knowledge and SQL tools."""
         system = (
             "你是连接到 OpenTenBase 的 AIOps 运维 Agent。运行时配置和数据库拓扑必须通过"
@@ -189,6 +189,11 @@ class AIOpsAgent:
             messages.append(assistant_message)
             for call in calls:
                 name = call.function.name
+                if event_callback:
+                    event_callback({
+                        "type": "tool", "stage": "running", "tool": name,
+                        "round": rounds,
+                    })
                 try:
                     arguments = json.loads(call.function.arguments or "{}")
                     handlers = {
@@ -215,6 +220,13 @@ class AIOpsAgent:
                 elif name == "search_knowledge":
                     trace_item["hits"] = result.get("hits", 0)
                 tool_trace.append(trace_item)
+                if event_callback:
+                    event_callback({
+                        "type": "tool",
+                        "stage": "failed" if failed else "completed",
+                        "tool": name,
+                        "round": rounds,
+                    })
                 messages.append({
                     "role": "tool", "tool_call_id": call.id,
                     "content": json.dumps(result, ensure_ascii=False, default=str),

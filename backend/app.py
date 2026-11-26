@@ -308,19 +308,18 @@ async def stream_question(request: QuestionRequest):
 
     async def run_agent():
         agent = AIOpsAgent(config)
+
+        def publish(event):
+            loop.call_soon_threadsafe(events.put_nowait, event)
+
         try:
             await events.put({"type": "progress", "stage": "thinking", "message": "Agent 正在理解问题"})
             result = await asyncio.to_thread(
-                lambda: asyncio.run(agent.chat(request.question, request.history))
+                lambda: asyncio.run(
+                    agent.chat(request.question, request.history, event_callback=publish)
+                )
             )
             trace = result.get("tool_trace") or []
-            for item in trace:
-                await events.put({
-                    "type": "tool",
-                    "tool": item.get("tool"),
-                    "round": item.get("round"),
-                    "failed": item.get("failed", False),
-                })
             await events.put({"type": "result", "answer": result.get("answer", ""),
                               "tool_trace": trace, "rounds": result.get("rounds", 0),
                               "runtime_context": result.get("runtime_context")})

@@ -2,6 +2,45 @@
 import streamlit as st
 import requests
 import json
+import uuid
+
+
+def save_session(api_base, session_id, session):
+    try:
+        response = requests.put(
+            f"{api_base}/api/agent/sessions/{session_id}",
+            json={"session_id": session_id, **session},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException:
+        return False
+
+
+def load_sessions(api_base):
+    sessions = st.session_state.agent_sessions
+    if st.session_state.agent_sessions_loaded:
+        return
+    try:
+        response = requests.get(f"{api_base}/api/agent/sessions", timeout=15)
+        response.raise_for_status()
+        for item in response.json().get("items", []):
+            sessions[item["session_id"]] = {
+                "title": item.get("title") or "新会话",
+                "messages": item.get("messages") or [],
+            }
+    except requests.RequestException:
+        pass
+
+    legacy_messages = st.session_state.pop("chat_messages", [])
+    if not sessions:
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {"title": "新会话", "messages": legacy_messages}
+        save_session(api_base, session_id, sessions[session_id])
+    st.session_state.agent_sessions_loaded = True
+    if st.session_state.active_agent_session not in sessions:
+        st.session_state.active_agent_session = next(iter(sessions))
 
 def render(config):
     """Render AI chat assistant page"""
@@ -18,22 +57,47 @@ def render(config):
 
     api_base = config.AIOPS_API_URL if hasattr(config, 'AIOPS_API_URL') else "http://aiops-api:8000"
 
-    # Initialize chat history in session state
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-        # Welcome message
-        st.session_state.chat_messages.append({
-            "role": "assistant",
-            "content": """👋 你好！我是 OpenTenBase 智能运维助手。
-
-我可以帮助你：
-• 🔍 **实时诊断**：查询集群状态、锁情况、性能指标
-• 💡 **问题解答**：回答 OpenTenBase 相关的技术问题
-• 🛠️ **优化建议**：提供 SQL 优化和配置调优建议
-• 📚 **知识查询**：检索官方文档和最佳实践
-
-请问有什么可以帮助你的？"""
-        })
+    st.session_state.setdefault("agent_sessions", {})
+    st.session_state.setdefault("active_agent_session", None)
+    st.session_state.setdefault("agent_sessions_loaded", False)
+    load_sessions(api_base)
+    sessions = st.session_state.agent_sessions
+    with st.sidebar:
+        st.markdown("#### Agent 会话")
+        session_ids = list(sessions)
+        selected = st.selectbox(
+            "会话", session_ids,
+            index=session_ids.index(st.session_state.active_agent_session),
+            format_func=lambda session_id: sessions[session_id]["title"],
+            label_visibility="collapsed",
+        )
+        if selected != st.session_state.active_agent_session:
+            st.session_state.active_agent_session = selected
+            st.rerun()
+        new_column, delete_column = st.columns(2)
+        with new_column:
+            if st.button("新建会话", use_container_width=True):
+                session_id = str(uuid.uuid4())
+                sessions[session_id] = {"title": "新会话", "messages": []}
+                st.session_state.active_agent_session = session_id
+                if not save_session(api_base, session_id, sessions[session_id]):
+                    st.warning("会话已在本地创建，暂未保存到服务端。")
+                st.rerun()
+        with delete_column:
+            can_delete = len(sessions) > 1
+            if st.button("删除会话", use_container_width=True, disabled=not can_delete):
+                session_id = st.session_state.active_agent_session
+                try:
+                    response = requests.delete(
+                        f"{api_base}/api/agent/sessions/{session_id}", timeout=15
+                    )
+                    response.raise_for_status()
+                    del sessions[session_id]
+                    st.session_state.active_agent_session = next(iter(sessions))
+                    st.rerun()
+                except requests.RequestException as error:
+                    st.error(f"删除会话失败：{error}")
+    active_session = sessions[st.session_state.active_agent_session]
 
     # Quick action buttons
     st.markdown("#### 💬 快速提问")
@@ -53,7 +117,7 @@ def render(config):
     # Display chat history
     st.markdown("---")
 
-    for message in st.session_state.chat_messages:
+    for message in active_session["messages"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
@@ -69,21 +133,26 @@ def render(config):
     if "pending_question" in st.session_state:
         user_input = st.session_state.pending_question
         del st.session_state.pending_question
-        handle_user_input(user_input, api_base, config)
+        handle_user_input(user_input, api_base, active_session, config)
 
     # Chat input
     if prompt := st.chat_input("输入你的问题..."):
-        handle_user_input(prompt, api_base, config)
+        handle_user_input(prompt, api_base, active_session, config)
 
 
-def handle_user_input(user_input, api_base, config):
+def handle_user_input(user_input, api_base, active_session, config):
     """Handle user chat input"""
 
     # Add user message to history
-    st.session_state.chat_messages.append({
+    active_session["messages"].append({
         "role": "user",
         "content": user_input
     })
+    if active_session["title"] == "新会话":
+        active_session["title"] = user_input[:24] + ("…" if len(user_input) > 24 else "")
+    session_id = st.session_state.active_agent_session
+    if not save_session(api_base, session_id, active_session):
+        st.warning("问题已加入本地会话，但服务端暂时无法保存。")
 
     # Display user message
     with st.chat_message("user"):
@@ -102,7 +171,7 @@ def handle_user_input(user_input, api_base, config):
                     "question": user_input,
                     "history": [
                         {"role": msg["role"], "content": msg["content"]}
-                        for msg in st.session_state.chat_messages[:-1]  # Exclude the message we just added
+                        for msg in active_session["messages"][:-1]
                     ]
                 },
                 stream=True, timeout=900
@@ -115,9 +184,18 @@ def handle_user_input(user_input, api_base, config):
                     if not raw_line or not raw_line.startswith(b"data:"):
                         continue
                     event = json.loads(raw_line[5:])
-                    if event.get("type") == "tool":
+                    if event.get("type") == "progress":
+                        message_placeholder.info(event.get("message", "Agent 正在处理"))
+                    elif event.get("type") == "tool":
                         tool_calls.append(event)
-                        message_placeholder.info(f"正在调用 {event.get('tool', '数据库工具')} · 第 {event.get('round', 0)} 轮")
+                        tool_name = event.get("tool", "数据库工具")
+                        round_number = event.get("round", 0)
+                        if event.get("stage") == "running":
+                            message_placeholder.info(f"正在调用 {tool_name} · 第 {round_number} 轮")
+                        elif event.get("stage") == "failed":
+                            message_placeholder.warning(f"{tool_name} 调用失败 · 第 {round_number} 轮")
+                        else:
+                            message_placeholder.success(f"{tool_name} 已完成 · 第 {round_number} 轮")
                     elif event.get("type") == "result":
                         result = event
                         break
@@ -141,54 +219,26 @@ def handle_user_input(user_input, api_base, config):
                                 st.code(json.dumps(tool_call["result"], ensure_ascii=False, indent=2)[:500], language="json")
 
                 # Add to history
-                st.session_state.chat_messages.append({
+                active_session["messages"].append({
                     "role": "assistant",
                     "content": assistant_message,
                     "tool_calls": tool_calls
                 })
+                if not save_session(api_base, session_id, active_session):
+                    st.warning("回复已生成，但会话保存失败。")
 
             else:
                 error_msg = f"❌ 请求失败: {response.status_code}\n\n{response.text}"
                 message_placeholder.markdown(error_msg)
-                st.session_state.chat_messages.append({
-                    "role": "assistant",
-                    "content": error_msg
-                })
 
         except requests.ConnectionError:
             error_msg = "❌ 无法连接到 API 服务，请确认服务正在运行"
             message_placeholder.markdown(error_msg)
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": error_msg
-            })
         except requests.Timeout:
             error_msg = "⏱️ 请求超时，请稍后重试"
             message_placeholder.markdown(error_msg)
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": error_msg
-            })
         except Exception as e:
             error_msg = f"❌ 发生错误: {str(e)}"
             message_placeholder.markdown(error_msg)
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": error_msg
-            })
 
     st.rerun()
-
-
-# Sidebar controls
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("#### 💬 会话控制")
-
-    if st.button("🗑️ 清空对话历史", use_container_width=True):
-        st.session_state.chat_messages = []
-        st.rerun()
-
-    if st.session_state.get("chat_messages"):
-        message_count = len([m for m in st.session_state.chat_messages if m["role"] == "user"])
-        st.caption(f"已发送 {message_count} 条消息")

@@ -113,11 +113,19 @@ class AgentDiagnosisTests(unittest.IsolatedAsyncioTestCase):
             "backend.ai.agent_client.execute_sql",
             new=AsyncMock(return_value={"success": True, "rows": [{"value": 1}]}),
         ) as execute:
-            result = await agent.chat("查询当前数据库", [{"role": "user", "content": "确认连接"}])
+            events = []
+            result = await agent.chat(
+                "查询当前数据库", [{"role": "user", "content": "确认连接"}],
+                event_callback=events.append,
+            )
 
         self.assertEqual(result["answer"], "查询返回 1。")
         self.assertEqual(result["rounds"], 1)
         self.assertTrue(result["tool_trace"][0]["success"])
+        self.assertEqual(
+            [(event["stage"], event["tool"]) for event in events],
+            [("running", "execute_sql"), ("completed", "execute_sql")],
+        )
         execute.assert_awaited_once_with(sql="SELECT 1 AS value")
         first_messages = completion.call_args_list[0].kwargs["messages"]
         self.assertIn("connected_via_live_connector", first_messages[0]["content"])
