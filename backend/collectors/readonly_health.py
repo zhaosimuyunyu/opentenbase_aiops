@@ -34,9 +34,9 @@ CHECKS = {
                pg_catalog.has_function_privilege(deadlock_oid, 'EXECUTE') AS deadlock_executable,
                EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions
                        WHERE name = 'pg_unlock') AS package_available
-        FROM (SELECT pg_catalog.to_regprocedure('public.pg_unlock_check_dependency()')::oid
+        FROM (SELECT pg_catalog.to_regprocedure('pg_unlock_check_dependency()')::oid
                      AS dependency_oid,
-                     pg_catalog.to_regprocedure('public.pg_unlock_check_deadlock()')::oid
+                     pg_catalog.to_regprocedure('pg_unlock_check_deadlock()')::oid
                      AS deadlock_oid) AS diagnostic
     """,
     "pg_clean_diagnostics": """
@@ -49,9 +49,9 @@ CHECKS = {
                (SELECT extversion FROM pg_catalog.pg_extension
                 WHERE extname = 'pg_clean') AS installed_version,
                pg_catalog.current_setting('enable_clean_2pc_launcher', true) AS launcher_setting
-        FROM (SELECT pg_catalog.to_regprocedure('public.pg_clean_check_txn(integer)')::oid
+        FROM (SELECT pg_catalog.to_regprocedure('pg_clean_check_txn(integer)')::oid
                      AS function_oid,
-                     pg_catalog.to_regprocedure('public.pgxc_get_record_list()')::oid
+                     pg_catalog.to_regprocedure('pgxc_get_record_list()')::oid
                      AS record_list_oid) AS diagnostic
     """,
     "database_identity": """
@@ -183,10 +183,18 @@ CHECKS = {
 
 
 class ReadonlyHealthCollector:
-    def __init__(self, config=None, statement_timeout_ms=2500, lock_timeout_ms=750):
+    def __init__(self, config=None, statement_timeout_ms=None, lock_timeout_ms=None):
         self.config = config or Config()
-        self.statement_timeout_ms = statement_timeout_ms
-        self.lock_timeout_ms = lock_timeout_ms
+        self.statement_timeout_ms = max(
+            250,
+            int(statement_timeout_ms if statement_timeout_ms is not None else
+                getattr(self.config, "AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS", 2500)),
+        )
+        self.lock_timeout_ms = max(
+            100,
+            int(lock_timeout_ms if lock_timeout_ms is not None else
+                getattr(self.config, "AIOPS_COLLECTION_LOCK_TIMEOUT_MS", 750)),
+        )
 
     def _set_query_timeouts(self, cursor):
         cursor.execute(

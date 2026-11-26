@@ -65,6 +65,34 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertIn("pg_unlock_check_dependency", CHECKS["pg_unlock_diagnostics"])
         self.assertIn("pg_unlock_check_deadlock", CHECKS["pg_unlock_diagnostics"])
         self.assertNotIn("pg_unlock_execute", CHECKS["pg_unlock_diagnostics"])
+        self.assertNotIn("public.pg_unlock_", CHECKS["pg_unlock_diagnostics"])
+        self.assertIn("to_regprocedure('pg_unlock_check_dependency()')", CHECKS["pg_unlock_diagnostics"])
+
+    def test_readonly_health_collector_uses_configured_query_timeouts(self):
+        collector = ReadonlyHealthCollector(SimpleNamespace(
+            AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS=6000,
+            AIOPS_COLLECTION_LOCK_TIMEOUT_MS=1800,
+        ))
+        cursor = MagicMock()
+
+        collector._set_query_timeouts(cursor)
+
+        self.assertEqual(cursor.execute.call_args.args[1], ("6000ms", "1800ms"))
+
+    def test_readonly_health_collector_allows_explicit_timeout_overrides(self):
+        collector = ReadonlyHealthCollector(
+            SimpleNamespace(
+                AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS=6000,
+                AIOPS_COLLECTION_LOCK_TIMEOUT_MS=1800,
+            ),
+            statement_timeout_ms=4000,
+            lock_timeout_ms=1200,
+        )
+        cursor = MagicMock()
+
+        collector._set_query_timeouts(cursor)
+
+        self.assertEqual(cursor.execute.call_args.args[1], ("4000ms", "1200ms"))
 
     def test_lock_collection_filters_invalid_open_tenbase_blocker_pid(self):
         self.assertIn("array_remove(pg_blocking_pids(l.pid), 0)", CHECKS["locks"])
