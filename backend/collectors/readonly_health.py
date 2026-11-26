@@ -220,6 +220,14 @@ class ReadonlyHealthCollector:
                     connection.rollback()
                     errors[name] = _collection_error(error)
             nodes = results.get("nodes", [])
+            pg_clean_rows, pg_clean_errors = self._collect_pg_clean_transactions(
+                connection,
+                results.get("pg_clean_diagnostics", []),
+                results.get("prepared_transactions", []),
+            )
+            if pg_clean_rows or pg_clean_errors:
+                results["pg_clean_transaction_diagnostics"] = pg_clean_rows
+            errors.update(pg_clean_errors)
             if "nodes" in results:
                 connectivity = self._probe_node_connectivity(nodes)
                 results["node_connectivity"] = connectivity
@@ -280,6 +288,28 @@ class ReadonlyHealthCollector:
             "checks": results,
             "errors": errors,
         }
+
+    def _collect_pg_clean_transactions(self, connection, diagnostics, prepared_transactions):
+        diagnostic = next(iter(diagnostics or []), {})
+        if not prepared_transactions or not all(
+            diagnostic.get(key) is True
+            for key in ("registered", "executable")
+        ):
+            return [], {}
+
+        try:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                self._set_query_timeouts(cursor)
+                cursor.execute(
+                    "SELECT * FROM pg_clean_check_txn(%s)",
+                    (self.config.AIOPS_PG_CLEAN_MIN_AGE_SECONDS,),
+                )
+                rows = [dict(row) for row in cursor.fetchall()]
+            connection.rollback()
+            return rows, {}
+        except Exception as error:
+            connection.rollback()
+            return [], {"pg_clean_transaction_diagnostics": _collection_error(error)}
 
     @staticmethod
     def _probe_node_connectivity(nodes):

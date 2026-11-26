@@ -94,6 +94,58 @@ class NodeConnectivityTests(unittest.TestCase):
 
         self.assertEqual(cursor.execute.call_args.args[1], ("4000ms", "1200ms"))
 
+    def test_official_pg_clean_check_runs_only_for_visible_executable_function(self):
+        config = SimpleNamespace(
+            AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS=2500,
+            AIOPS_COLLECTION_LOCK_TIMEOUT_MS=750,
+            AIOPS_PG_CLEAN_MIN_AGE_SECONDS=10,
+        )
+        collector = ReadonlyHealthCollector(config)
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [{"gid": "g1", "global_transaction_status": "TXN_STATUS_PREPARED"}]
+        prepared = [{"transaction_id": "1", "gid": "g1"}]
+
+        missing, errors = collector._collect_pg_clean_transactions(
+            connection,
+            [{"registered": False, "executable": None}],
+            prepared,
+        )
+        self.assertEqual((missing, errors), ([], {}))
+        connection.cursor.assert_not_called()
+
+        rows, errors = collector._collect_pg_clean_transactions(
+            connection,
+            [{"registered": True, "executable": True}],
+            prepared,
+        )
+
+        self.assertEqual(rows[0]["gid"], "g1")
+        self.assertEqual(errors, {})
+        self.assertEqual(cursor.execute.call_args.args[0], "SELECT * FROM pg_clean_check_txn(%s)")
+        self.assertEqual(cursor.execute.call_args.args[1], (10,))
+        connection.rollback.assert_called_once()
+
+    def test_official_pg_clean_check_failure_is_isolated(self):
+        collector = ReadonlyHealthCollector(SimpleNamespace(
+            AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS=2500,
+            AIOPS_COLLECTION_LOCK_TIMEOUT_MS=750,
+            AIOPS_PG_CLEAN_MIN_AGE_SECONDS=10,
+        ))
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.execute.side_effect = [None, RuntimeError("diagnostic unavailable")]
+
+        rows, errors = collector._collect_pg_clean_transactions(
+            connection,
+            [{"registered": True, "executable": True}],
+            [{"gid": "g1"}],
+        )
+
+        self.assertEqual(rows, [])
+        self.assertEqual(errors["pg_clean_transaction_diagnostics"]["type"], "RuntimeError")
+        connection.rollback.assert_called_once()
+
     def test_lock_collection_filters_invalid_open_tenbase_blocker_pid(self):
         self.assertIn("array_remove(pg_blocking_pids(l.pid), 0)", CHECKS["locks"])
 

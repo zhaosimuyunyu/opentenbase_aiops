@@ -123,7 +123,7 @@ class ReadonlyAuditEngine:
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info', 'database_identity',
                     'prepared_transactions', 'data_node_prepared_transactions', 'pg_clean_diagnostics',
-                    'pg_unlock_diagnostics', 'key_guc',
+                    'pg_clean_transaction_diagnostics', 'pg_unlock_diagnostics', 'key_guc',
                     'node_connectivity')}
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
@@ -257,6 +257,7 @@ class ReadonlyAuditEngine:
             if row.get('transactionid') is not None
         }
         prepared_by_gid = {}
+        pg_clean_results = checks.get('pg_clean_transaction_diagnostics') or []
         for transaction in checks.get('data_node_prepared_transactions') or []:
             prepared_by_gid.setdefault(transaction.get('gid'), []).append(transaction)
         blocked_gids = {
@@ -273,6 +274,9 @@ class ReadonlyAuditEngine:
             transaction['data_node_participants'] = prepared_by_gid.get(
                 transaction.get('gid'), []
             )
+            transaction['official_diagnostics'] = [
+                row for row in pg_clean_results if row.get('gid') == transaction.get('gid')
+            ]
             transaction['held_transaction_locks'] = [
                 lock for lock in lock_rows
                 if lock['granted'] and lock.get('pid') is None

@@ -70,6 +70,9 @@ class Config:
     AIOPS_COLLECTION_LOCK_TIMEOUT_MS: int = max(
         100, int(os.getenv("AIOPS_COLLECTION_LOCK_TIMEOUT_MS", "750"))
     )
+    AIOPS_PG_CLEAN_MIN_AGE_SECONDS: int = max(
+        1, int(os.getenv("AIOPS_PG_CLEAN_MIN_AGE_SECONDS", "10"))
+    )
 
     # Application
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
