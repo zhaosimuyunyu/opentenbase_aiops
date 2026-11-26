@@ -215,16 +215,17 @@ def render_table_statistics(db_connector, config):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("表数量", len(tables))
+        st.metric("表节点统计数", len(tables))
     with col2:
         st.metric("总大小", f"{total_size / (1024**3):.2f} GB")
     with col3:
-        st.metric("总行数", f"{total_rows:,}")
+        st.metric("节点估算行数汇总", f"{total_rows:,}")
 
     # Display table data
     table_data = []
     for table in tables:
         table_data.append({
+            "节点": table.get('node_name', '—'),
             "Schema": table.get('schemaname', 'N/A'),
             "表名": table.get('tablename', 'N/A'),
             "行数": f"{table.get('n_live_tup', 0):,}",

@@ -146,6 +146,31 @@ class NodeConnectivityTests(unittest.TestCase):
         self.assertEqual(errors["pg_clean_transaction_diagnostics"]["type"], "RuntimeError")
         connection.rollback.assert_called_once()
 
+    def test_distributed_metric_rows_preserve_node_identity(self):
+        collector = ReadonlyHealthCollector(SimpleNamespace(
+            AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS=2500,
+            AIOPS_COLLECTION_LOCK_TIMEOUT_MS=750,
+        ))
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [{"tablename": "orders", "total_bytes": 4096}]
+        nodes = [
+            {"node_name": "cn0001", "node_type": "C"},
+            {"node_name": "dn0001", "node_type": "D"},
+        ]
+
+        rows, errors = collector._collect_data_node_rows(
+            connection, nodes, "storage", CHECKS["storage"]
+        )
+
+        self.assertEqual(rows, [{"node_name": "dn0001", "tablename": "orders", "total_bytes": 4096}])
+        self.assertEqual(errors, {})
+        query = cursor.execute.call_args_list[1]
+        self.assertEqual(query.args[0].seq[0].string, "EXECUTE DIRECT ON (")
+        self.assertEqual(query.args[0].seq[1].string, "dn0001")
+        self.assertEqual(query.args[1], (CHECKS["storage"],))
+        connection.rollback.assert_called_once()
+
     def test_lock_collection_filters_invalid_open_tenbase_blocker_pid(self):
         self.assertIn("array_remove(pg_blocking_pids(l.pid), 0)", CHECKS["locks"])
 
@@ -166,6 +191,8 @@ class NodeConnectivityTests(unittest.TestCase):
             collector, "_collect_data_node_lock_blockers", return_value=([], {})
         ), patch.object(
             collector, "_collect_data_node_long_queries", return_value=([], {})
+        ), patch.object(
+            collector, "_collect_data_node_rows", return_value=([], {})
         ), patch(
             "backend.collectors.readonly_health.SlowQueryLogCollector"
         ) as log_collector, patch.object(

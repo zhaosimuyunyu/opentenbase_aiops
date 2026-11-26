@@ -12,6 +12,7 @@ class PerformanceCollectorTests(unittest.TestCase):
             AIOPS_COLLECTION_LOCK_TIMEOUT_MS=750,
         )
         connector = MagicMock()
+        connector.execute_query.return_value = []
         collector = PerformanceCollector(connector, config)
         cursor = connector.get_cursor.return_value.__enter__.return_value
         cursor.fetchall.return_value = []
@@ -60,6 +61,21 @@ class PerformanceCollectorTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(cursor.execute.call_args_list[1].args[1], (500,))
         self.assertIn("pg_stat_user_tables", cursor.execute.call_args_list[1].args[0])
+
+    def test_distributed_table_statistics_use_direct_data_node_collection(self):
+        collector, connector, cursor = self.make_collector()
+        connector.execute_query.return_value = [{"node_name": "dn0001"}]
+        cursor.fetchall.return_value = [{"tablename": "orders", "n_live_tup": 25}]
+
+        result = collector.collect_table_stats(limit=50000)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["data"]["tables"], [
+            {"node_name": "dn0001", "tablename": "orders", "n_live_tup": 25},
+        ])
+        direct_query = cursor.execute.call_args_list[1]
+        self.assertEqual(direct_query.args[0].seq[1].string, "dn0001")
+        self.assertIn("LIMIT 500", direct_query.args[1][0])
 
 
 if __name__ == "__main__":

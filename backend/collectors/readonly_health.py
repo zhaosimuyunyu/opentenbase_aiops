@@ -210,6 +210,11 @@ class ReadonlyHealthCollector:
             connection = connector.connect()
             connection.set_session(readonly=True, autocommit=False)
             for name, sql in CHECKS.items():
+                distributed_nodes = results.get("nodes", [])
+                if name in {"table_stats", "index_usage", "storage"} and any(
+                    node.get("node_type") == "D" for node in distributed_nodes
+                ):
+                    continue
                 try:
                     with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                         self._set_query_timeouts(cursor)
@@ -254,6 +259,16 @@ class ReadonlyHealthCollector:
                 )
                 results["data_node_table_stats"] = node_stats
                 errors.update(node_stats_errors)
+                node_index_usage, index_usage_errors = self._collect_data_node_rows(
+                    connection, nodes, "index_usage", CHECKS["index_usage"]
+                )
+                results["data_node_index_usage"] = node_index_usage
+                errors.update(index_usage_errors)
+                node_storage, storage_errors = self._collect_data_node_rows(
+                    connection, nodes, "storage", CHECKS["storage"]
+                )
+                results["data_node_storage"] = node_storage
+                errors.update(storage_errors)
                 if table is None and any(
                     error.get("sqlstate") == "55P03" or error.get("type") == "CollectionLimit"
                     for error in node_stats_errors.values()
@@ -288,6 +303,29 @@ class ReadonlyHealthCollector:
             "checks": results,
             "errors": errors,
         }
+
+    def _collect_data_node_rows(self, connection, nodes, check_name, statement):
+        rows = []
+        errors = {}
+        for node in nodes:
+            if node.get("node_type") != "D":
+                continue
+            name = node.get("node_name")
+            try:
+                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                    self._set_query_timeouts(cursor)
+                    cursor.execute(
+                        sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
+                        (statement,),
+                    )
+                    rows.extend(
+                        {"node_name": name, **dict(row)} for row in cursor.fetchall()
+                    )
+                connection.rollback()
+            except Exception as error:
+                connection.rollback()
+                errors[f"data_node_{check_name}:{name}"] = _collection_error(error)
+        return rows, errors
 
     def _collect_pg_clean_transactions(self, connection, diagnostics, prepared_transactions):
         diagnostic = next(iter(diagnostics or []), {})

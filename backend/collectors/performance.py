@@ -1,5 +1,6 @@
 """Performance metrics collector"""
 from typing import Dict, Any, List
+from psycopg2 import sql
 from .base import BaseCollector
 from ..utils.logger import setup_logger
 from ..utils.config import Config
@@ -26,6 +27,43 @@ class PerformanceCollector(BaseCollector):
             )
             cursor.execute(statement, params)
             return cursor.fetchall()
+
+    def _query_data_nodes(self, statement, check_name):
+        nodes = self.db.execute_query(
+            "SELECT node_name FROM pgxc_node WHERE node_type='D' ORDER BY node_name"
+        )
+        if nodes is None:
+            self._record_error(
+                "data_node_discovery", RuntimeError("Could not discover registered data nodes")
+            )
+            return None
+        if not nodes:
+            return None
+
+        rows = []
+        for node in nodes:
+            node_name = node["node_name"]
+            try:
+                with self.db.get_cursor() as cursor:
+                    cursor.execute(
+                        "SELECT set_config('statement_timeout', %s, true), "
+                        "set_config('lock_timeout', %s, true)",
+                        (
+                            f"{self.config.AIOPS_COLLECTION_STATEMENT_TIMEOUT_MS}ms",
+                            f"{self.config.AIOPS_COLLECTION_LOCK_TIMEOUT_MS}ms",
+                        ),
+                    )
+                    cursor.execute(
+                        sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(node_name)),
+                        (statement,),
+                    )
+                    rows.extend(
+                        {"node_name": node_name, **dict(row)}
+                        for row in cursor.fetchall()
+                    )
+            except Exception as error:
+                self._record_error(f"data_node_{check_name}:{node_name}", error)
+        return rows
 
     def _collect_single(self, name, reader, key):
         self.errors = []
@@ -77,13 +115,24 @@ class PerformanceCollector(BaseCollector):
         statement = """
             SELECT schemaname, relname AS tablename, n_live_tup,
                    n_dead_tup, n_tup_ins, n_tup_upd, n_tup_del,
-                   last_vacuum, last_autovacuum, last_analyze, last_autoanalyze
+                   last_vacuum, last_autovacuum, last_analyze, last_autoanalyze,
+                   pg_catalog.pg_relation_size(relid) AS table_size_bytes,
+                   pg_catalog.pg_indexes_size(relid) AS indexes_size_bytes,
+                   pg_catalog.pg_total_relation_size(relid) AS total_size_bytes
             FROM pg_catalog.pg_stat_user_tables
             WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
             ORDER BY n_live_tup DESC LIMIT %s
         """
+
+        def read_tables():
+            remote_statement = statement.replace("LIMIT %s", f"LIMIT {limit}")
+            rows = self._query_data_nodes(remote_statement, "table_stats")
+            if rows is not None:
+                return sorted(rows, key=lambda row: row.get("n_live_tup") or 0, reverse=True)[:limit]
+            return self._query_rows(statement, (limit,))
+
         return self._collect_single(
-            "table_stats", lambda: self._query_rows(statement, (limit,)), "tables"
+            "table_stats", read_tables, "tables"
         )
 
     def collect(self) -> Dict[str, Any]:
@@ -125,6 +174,9 @@ class PerformanceCollector(BaseCollector):
         """
         try:
             locks = self._query_rows(sql)
+            node_locks = self._query_data_nodes(sql, "locks")
+            if node_locks is not None:
+                locks.extend(node_locks)
 
             blocking = [l for l in locks if not l['granted']] if locks else []
             active = [l for l in locks if l['granted']] if locks else []
@@ -161,6 +213,9 @@ class PerformanceCollector(BaseCollector):
         """
         try:
             result = self._query_rows(sql)
+            node_queries = self._query_data_nodes(sql, "long_running_queries")
+            if node_queries is not None:
+                result.extend(node_queries)
             return result if result else []
         except Exception as e:
             self._record_error('long_running_queries', e)
@@ -181,14 +236,19 @@ class PerformanceCollector(BaseCollector):
             last_vacuum,
             last_autovacuum,
             last_analyze,
-            last_autoanalyze
+            last_autoanalyze,
+            pg_catalog.pg_relation_size(relid) as table_size_bytes,
+            pg_catalog.pg_indexes_size(relid) as indexes_size_bytes,
+            pg_catalog.pg_total_relation_size(relid) as total_size_bytes
         FROM pg_stat_user_tables
         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
         ORDER BY n_live_tup DESC
         LIMIT 50;
         """
         try:
-            result = self._query_rows(sql)
+            result = self._query_data_nodes(sql, "table_stats")
+            if result is None:
+                result = self._query_rows(sql)
             return result if result else []
         except Exception as e:
             self._record_error('table_stats', e)
@@ -211,7 +271,9 @@ class PerformanceCollector(BaseCollector):
         LIMIT 50;
         """
         try:
-            result = self._query_rows(sql)
+            result = self._query_data_nodes(sql, "index_usage")
+            if result is None:
+                result = self._query_rows(sql)
 
             # Find unused indexes
             unused = [idx for idx in result if idx['scans'] == 0] if result else []

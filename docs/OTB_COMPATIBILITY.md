@@ -118,6 +118,14 @@ API 容器能够通过 psycopg2 连接 OpenTenBase_v5.0 的 CN，读取节点注
 
 全库巡检通过 `EXECUTE DIRECT ON` 读取各 DN 的统计视图。当前表统计、索引统计和两个 DN 的批量表统计均观测到 SQLSTATE `55P03`。协调节点的 `pgxc_class` 扫描也超时，`pg_namespace` 查询成功。目标表巡检通过 OID 读取统计函数，现场验收时避开了这类目录扫描。
 
+### 2026-11-26 分布式统计采集复测
+
+分布式拓扑中，健康巡检不再从 CN 执行全量表统计、索引统计和存储目录扫描，改为通过 `EXECUTE DIRECT ON` 在每个 DN 独立读取，并保留 DN 身份和逐节点错误。单节点或未发现 DN 时仍使用原 CN 查询。性能指标 API 和表统计页采用相同的 DN 采集方式，表统计结果包含表大小、索引大小、总大小和节点名称。
+
+在当前 OpenTenBase v5.0 `postgres` 集群实测，健康巡检采集状态为 `success`，采集错误为空。结果包含 27 个按表汇总的统计项、76 条索引统计和 52 条 DN 存储记录。`/api/performance/metrics` 返回 `success`，包含 54 条表节点统计和 76 条索引统计，覆盖 `dn0001`、`dn0002`，锁记录共 38 条，采集错误为零。单项 DN 查询在该实验集群中约 5–20 ms，不能视为生产负载性能基线。
+
+GXID `21973` 的 prepared transaction 和关联锁等待仍被报告为高风险，没有执行提交或回滚。官方 `pg_clean` 扩展在当前集群仍未安装，因此官方 2PC 状态诊断分支未被现场执行。
+
 协调节点的锁证据显示 XID `21973` 同时有已授予的排他事务锁和等待者。关联 GID 在两个 DN 上也有预备事务记录。事务归属方需核对应用与协调器记录后确定处置。处置后重新运行无目标健康巡检，逐项核对 `table_stats`、`index_usage` 和各 DN 统计查询的采集状态。全库统计验收以这些查询实测成功为准。
 
 复测时，CN 和两个 DN 上直接扫描 `pg_class`、`pg_stat_user_tables` 和 `pg_stat_user_indexes` 均返回 `55P03`，`pg_namespace` 读取成功。分别在每个节点上使用独立会话观测 `pg_class` 扫描，超时前均捕获到未授予的 `transactionid ShareLock`。CN 等待本地 XID `21973`，DN1 等待 `11576`，DN2 等待 `11457`。各节点的 `pg_prepared_xacts` 将这些本地 XID 映射到同一 GID `_$XC$21973:cn0001:T:2:1`。

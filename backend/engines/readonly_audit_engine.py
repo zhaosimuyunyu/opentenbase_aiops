@@ -128,6 +128,7 @@ class ReadonlyAuditEngine:
         performance = {name: checks.get(name) for name in
                        ('locks', 'long_running_queries', 'idle_transactions',
                     'table_stats', 'index_usage', 'storage', 'data_node_table_stats',
+                    'data_node_index_usage', 'data_node_storage',
                     'data_node_stats_fallback', 'data_node_lock_blockers',
                     'data_node_long_running_queries', 'slow_query_logs')}
         findings = []
@@ -384,6 +385,7 @@ class ReadonlyAuditEngine:
             'locks', 'long_running_queries', 'idle_transactions',
             'table_stats', 'index_usage',
             'storage',
+            'data_node_table_stats', 'data_node_index_usage', 'data_node_storage',
             'data_node_lock_blockers',
             'data_node_long_running_queries',
             'slow_query_logs',
@@ -399,6 +401,7 @@ class ReadonlyAuditEngine:
             name for name in snapshot['errors']
             if name.startswith((
                 'data_node_stats:', 'data_node_lock_blockers:',
+                'data_node_index_usage:', 'data_node_storage:',
                 'data_node_long_running_queries:', 'slow_query_logs:',
             ))
         }
