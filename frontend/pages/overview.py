@@ -3,6 +3,8 @@ import streamlit as st
 import requests
 import html
 from datetime import datetime
+from frontend.cluster_status import cluster_health_banner
+
 
 def render(db_connector, config):
     """Render cluster overview page"""
@@ -52,17 +54,9 @@ def render(db_connector, config):
     # Health status banner
     online_nodes = sum(1 for item in connectivity if item.get('status') == 'reachable')
     total_nodes = len(nodes)
-
-    if result['status'] == 'partial' or online_nodes < total_nodes:
-        status_type = "warning"
-        status_icon = "⚠️"
-        status_title = "集群部分节点不可达"
-        status_message = f"{online_nodes}/{total_nodes} 个节点在线，部分节点可能需要检查"
-    else:
-        status_type = "success"
-        status_icon = "✅"
-        status_title = "集群运行正常"
-        status_message = f"所有 {total_nodes} 个注册节点网络可达，系统运行健康"
+    status_type, status_icon, status_title, status_message = cluster_health_banner(
+        result["status"], connectivity, total_nodes, len(result.get("errors", []))
+    )
 
     st.markdown(f"""
         <div class="alert-banner {status_type}">
