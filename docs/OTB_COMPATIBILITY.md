@@ -148,6 +148,12 @@ API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 
 
 可用 `docker compose exec -T aiops-api python -m scripts.benchmark_health_collection --runs 10 --concurrency 3` 重复执行串行与并发采集测量。2026-11-27 的 5 次串行样本为 5/5 成功，中位数 175.20 ms、P95 340.04 ms；3 路并发样本为 3/3 成功，墙钟 229.57 ms、零错误。2026-11-27 增强报告后以 2 次串行、2 路并发实测，两组均全成功，错误数为 0；样本结构支持按检查和节点定位错误类型及 SQLSTATE，且不复制原始异常文本。该脚本只读目标数据库，直接脚本入口 `python scripts/benchmark_health_collection.py` 也已验证。
 
+### 2026-11-27 并发采集复测
+
+通过 API 容器对 OpenTenBase v5.0 `postgres` 集群执行 10 次顺序采集和 3 路并发采集。配置 `statement_timeout=2500ms`、`lock_timeout=750ms`。顺序样本 10/10 成功、零错误，中位数 179.51 ms、最近秩 P95 265.61 ms、最大 265.61 ms；并发样本 3/3 成功、零错误，采集耗时中位数 219.84 ms、P95/最大 252.56 ms，总墙钟 253.79 ms。该测试仅覆盖当前实验集群的短时只读采集，不包含业务负载、长时间运行或生产容量验收。
+
+压测前后审计记录数从 205 增至 206。新增记录 ID `007e1fd7-56e4-400f-aba5-c73af88fa7a3` 的 `trigger=scheduled`，由同时运行的周期巡检产生；benchmark 本身只实例化只读采集器，不写审计表。
+
 ### 2026-11-26 周期巡检续跑与 AI 阶段耗时
 
 API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度器在上一条 scheduled 记录超过去重窗口后自然生成新记录 `78666cb2-149f-4470-bdf1-5adffec81f77`，采集状态为 `success`，没有 fallback，Prometheus 周期时间戳随之更新。该轮 collector 耗时为 330.79 ms。
