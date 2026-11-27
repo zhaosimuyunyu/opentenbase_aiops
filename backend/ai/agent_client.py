@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import re
 import time
@@ -71,7 +72,10 @@ def _model_evidence(value):
 
 
 def _run_async_tool(handler, **arguments):
-    return asyncio.run(handler(**arguments))
+    result = handler(**arguments)
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
 
 
 class AIOpsAgent:

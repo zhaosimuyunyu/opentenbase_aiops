@@ -25,10 +25,11 @@ $status = Invoke-RestMethod "$apiUrl/api/automation/status" -TimeoutSec 20
 
 if (-not $SkipLiveAgent) {
     Write-Output "[3/8] Asking the live AIOps agent to inspect the cluster"
+    Add-Type -AssemblyName System.Net.Http
     $sessionId = [guid]::NewGuid().ToString()
     $turnId = [guid]::NewGuid().ToString()
     $requestBody = @{
-        question = "Use live cluster diagnostics and the knowledge base. Report the observed topology, audit findings, and SQL tools available in this environment."
+        question = "For this read-only demo, call get_cluster_diagnostics, search_knowledge and search_operational_memory. Summarize the observed topology and cite relevant sources in at most 200 words. Do not call execute_sql or change database state."
         history = @()
         session_id = $sessionId
         turn_id = $turnId
@@ -44,7 +45,7 @@ if (-not $SkipLiveAgent) {
     $response = $httpClient.SendAsync(
         $httpRequest, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
     ).GetAwaiter().GetResult()
-    $response.EnsureSuccessStatusCode()
+    $null = $response.EnsureSuccessStatusCode()
     $reader = [System.IO.StreamReader]::new(
         $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
     )

@@ -3,7 +3,7 @@ import argparse
 import json
 import threading
 import time
-from urllib.request import Request, urlopen
+from .simulate_slow_query import _run_audit
 
 import psycopg2
 
@@ -23,28 +23,6 @@ def _connect(config, host, port, application_name):
         application_name=application_name,
         connect_timeout=8,
     )
-
-
-def _run_audit(api_url, timeout):
-    request = Request(
-        f"{api_url.rstrip('/')}/api/audits/health/stream",
-        data=b"",
-        headers={"Accept": "text/event-stream"},
-        method="POST",
-    )
-    events = []
-    with urlopen(request, timeout=timeout) as response:
-        for raw_line in response:
-            line = raw_line.decode("utf-8").strip()
-            if not line.startswith("data: "):
-                continue
-            event = json.loads(line[6:])
-            events.append(event)
-            if event["type"] == "result":
-                return event["audit"], events
-            if event["type"] in {"busy", "error"}:
-                raise RuntimeError(f"Health audit SSE ended with {event['type']}")
-    raise RuntimeError("Health audit SSE ended before returning a result")
 
 
 def main():
@@ -144,6 +122,8 @@ def main():
             raise RuntimeError(f"OpenTenBase did not report the expected blocker: {wait_row}")
 
         audit, events = _run_audit(args.api_url, args.timeout)
+        if audit is None:
+            raise RuntimeError("Health audit remained busy after retrying")
         finding = next(
             (item for item in audit.get("findings", []) if item.get("check") == "data_node_lock_waits"),
             None,

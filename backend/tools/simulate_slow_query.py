@@ -14,7 +14,7 @@ from ..utils.config import Config
 APP_NAME = "aiops-course-slow-query-demo"
 
 
-def _run_audit(api_url, timeout, busy_retries=6):
+def _run_audit(api_url, timeout, busy_retries=30):
     last_events = []
     for attempt in range(busy_retries + 1):
         audit, events = _run_audit_once(api_url, timeout)
@@ -143,7 +143,7 @@ def main():
                 "application_name": APP_NAME,
                 "sse_event_types": [event["type"] for event in events],
             }, ensure_ascii=False, indent=2))
-            return
+            raise SystemExit(1)
         captured = [
             row for row in ((audit.get("evidence") or {}).get("performance") or {}).get("slow_query_logs") or []
             if row.get("pid") == session.get("pid")
@@ -170,7 +170,7 @@ def main():
                 "sse_event_types": [event["type"] for event in events],
                 "reason": "The completed audit did not include the simulated PID in both performance evidence and findings",
             }, ensure_ascii=False, indent=2, default=str))
-            return
+            raise SystemExit(1)
         result = {
             "status": "passed",
             "node": node_name,
