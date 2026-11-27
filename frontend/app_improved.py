@@ -29,6 +29,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+from auth import require_ui_auth
+require_ui_auth(st)
 
 # Custom CSS - improved to prevent flickering
 st.markdown("""

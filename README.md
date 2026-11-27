@@ -102,6 +102,8 @@ docker compose exec -T aiops-api python -m scripts.benchmark_health_collection \
 
 设置 `AIOPS_API_KEY` 后，FastAPI 会要求所有 `/api/*`、`/metrics` 和根路径请求携带 `Authorization: Bearer <key>`。Streamlit 服务端使用同一环境变量调用 API，密钥不会发送到浏览器。`/health` 保留给 Docker 探针。将 API 暴露到其它来源时，应把 `AIOPS_CORS_ORIGINS` 设置为逗号分隔的明确来源，并通过 TLS 终止代理传输。这个共享 key 只提供服务级门禁，不提供用户身份或角色区分，修复审批仍由独立审批凭据控制。空 API key 仅适合隔离的本地开发环境。
 
+设置 `AIOPS_UI_PASSWORD` 后，Streamlit 页面会显示共享密码登录门禁，认证状态保存在服务端 Streamlit session。它不提供个人身份、角色或登录失败限流，生产环境应放在具备用户身份认证和 TLS 的反向代理之后。
+
 ## 📦 项目结构
 
 ```
@@ -153,6 +155,7 @@ opentenbase-aiops/
 | `AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS` | 从 CN/DN CSV 日志中读取近期慢语句的时间窗口 | `900` |
 | `AIOPS_SLOW_QUERY_REDACT_LITERALS` | 脱敏慢日志、活动查询和锁证据中的 SQL 字符串/数字 literal | `true` |
 | `AIOPS_API_KEY` | 保护所有 FastAPI `/api/*` 路由的 Bearer key，Streamlit 服务端也使用此 key | 空，仅限本地开发 |
+| `AIOPS_UI_PASSWORD` | Streamlit 页面共享登录密码 | 空，仅限本地开发 |
 | `AIOPS_CORS_ORIGINS` | 允许的浏览器来源，逗号分隔 | `*`，本地开发 |
 | `AIOPS_APPROVAL_TOKEN` | 修复审批令牌 | 空，审批执行关闭 |
 | `AIOPS_APPROVER_TOKENS` | 操作者 ID 到独立令牌的 JSON 对象。启用后由服务端按令牌识别审批人，停用共享令牌 | 空 |

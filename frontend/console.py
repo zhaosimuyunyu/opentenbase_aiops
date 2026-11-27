@@ -23,6 +23,8 @@ from backend.utils.db_connector import OpenTenBaseConnector
 
 
 st.set_page_config(page_title="OpenTenBase AIOps", page_icon="OTB", layout="wide")
+from auth import require_ui_auth
+require_ui_auth(st)
 
 API = os.getenv("AIOPS_API_URL", "http://aiops-api:8000")
 config = st.session_state.setdefault("config", Config())
