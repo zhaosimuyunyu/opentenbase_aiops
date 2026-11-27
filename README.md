@@ -6,6 +6,8 @@
 
 基于 AI 的 OpenTenBase 分布式数据库智能运维平台
 
+课程版已在 OpenTenBase v5.0 实验集群验证智能问答、健康巡检、锁等待诊断、慢日志诊断和人工审批后的 `ANALYZE` 修复。SQL 审核支持规则检查和执行计划分析，发布流水线集成仍待完成。完整验收结果及生产部署差距见 [最终验收报告](docs/FINAL_ACCEPTANCE.md)，演示步骤见 [课程交付说明](docs/COURSE_DELIVERY.md)。
+
 ## ✨ 功能特性
 
 - 🤖 **智能问答助手** - 基于 DeepSeek 大模型的数据库问题诊断
@@ -14,7 +16,7 @@
 - 🔍 **性能诊断** - 锁分析、慢查询检测、表统计
 - 🧪 **SQL 风险审核** - 危险语句规则、EXPLAIN 估算顺序扫描检测与只读计划展示
 - 🌐 **CN/DN 分布式采集** - 节点发现、只读巡检和逐节点失败隔离
-- 🧾 **风险审批策略** - 白名单只读工具自动运行，写操作与未知操作要求人工批准
+- 🧾 **修复审批** - 结构化修复支持人工审批、执行审计与后置验证。实验环境的交互式 SQL 工具使用配置的数据库账号权限
 - 🎯 **分布式特性** - 针对 OpenTenBase 分布式架构的专项诊断
 - 📈 **可视化报告** - 清晰的 Web 界面和数据展示
 
@@ -46,31 +48,32 @@
 ### 前置条件
 
 - Docker & Docker Compose
-- 已运行的 OpenTenBase 集群（容器化）
+- 已运行且能从 Docker 容器访问的 OpenTenBase 集群。默认 Compose 需要已存在的外部网络 `otb-lab-net`
 - DeepSeek API Key
 
 ### 1. 环境配置
 
-```bash
+```powershell
 # 克隆项目
-cd E:\opentenbase\kaiyuan_contribute\opentenbase-aiops
+git clone https://github.com/zhaosimuyunyu/opentenbase_aiops.git
+cd opentenbase_aiops
 
 # 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入 DeepSeek API Key
+Copy-Item .env.example .env
+# 编辑 .env，填写 OpenTenBase 连接信息和 DeepSeek API Key
 ```
 
 ### 2. 容器化部署
 
 ```bash
 # 构建镜像
-docker-compose build
+docker compose build
 
 # 启动服务
-docker-compose up -d
+docker compose up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ### 3. 访问服务
