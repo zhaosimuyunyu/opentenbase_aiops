@@ -12,7 +12,7 @@
 - 🔁 **周期健康巡检** - 可选定时采集、AI 分析并将审计结果持久化
 - 📊 **健康监控** - 实时集群状态监控和健康巡检
 - 🔍 **性能诊断** - 锁分析、慢查询检测、表统计
-- 🧪 **SQL 风险审核** - 危险语句规则检查与只读 EXPLAIN
+- 🧪 **SQL 风险审核** - 危险语句规则、EXPLAIN 估算顺序扫描检测与只读计划展示
 - 🌐 **CN/DN 分布式采集** - 节点发现、只读巡检和逐节点失败隔离
 - 🧾 **风险审批策略** - 白名单只读工具自动运行，写操作与未知操作要求人工批准
 - 🎯 **分布式特性** - 针对 OpenTenBase 分布式架构的专项诊断
@@ -21,29 +21,24 @@
 ## 🏗️ 架构
 
 ```
-┌─────────────────┐
-│   Streamlit UI  │ (Port 8080)
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   FastAPI       │ (Port 8000, Optional)
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Collectors    │
-│   - Cluster     │
-│   - Performance │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  DeepSeek LLM   │
-│  (AI Engine)    │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  OpenTenBase    │
-│   (容器化部署)   │
-└─────────────────┘
+┌────────────────────────┐
+│ Streamlit UI :8088     │
+└───────────┬────────────┘
+            │ HTTP / SSE
+┌───────────▼────────────┐
+│ FastAPI :8000           │
+│ Agent / Audit / Repair  │
+└───────┬─────────┬───────┘
+        │         │
+┌───────▼─────┐ ┌─▼────────────────┐
+│ OpenTenBase │ │ PostgreSQL 16     │
+│ CN / DN     │ │ pgvector + state  │
+└──────┬──────┘ └──────────────────┘
+       │
+┌──────▼────────┐       ┌──────────────┐
+│ Read-only     │──────▶│ DeepSeek LLM │
+│ Collectors    │       └──────────────┘
+└───────────────┘
 ```
 
 ## 🚀 快速开始
@@ -96,6 +91,10 @@ curl http://localhost:8000/api/automation/status
 # 重复测量只读采集耗时、并发成功率和 SQLSTATE 错误分布
 docker compose exec -T aiops-api python -m scripts.benchmark_health_collection \
   --runs 10 --concurrency 3
+
+# 可选持续只读采集，观察延迟漂移和错误累积
+docker compose exec -T aiops-api python -m scripts.benchmark_health_collection \
+  --runs 3 --concurrency 2 --sustain-seconds 30
 ```
 
 `/health` 同时检查 OpenTenBase 和 metadata PostgreSQL，并在 `capabilities.ai_analysis.configured` 报告 AI 模型密钥是否已配置，在 `security.api_key_authentication` 报告 API key 是否已启用。AI 未配置时，数据库和 metadata 依赖仍可 ready，监控端可单独识别 AI 能力不可用。周期巡检状态保存在 metadata PostgreSQL，API 重启后会恢复完成/失败状态和下一次重试时间。benchmark 只读目标数据库，不执行修复操作。
@@ -177,6 +176,7 @@ opentenbase-aiops/
 | `AIOPS_AUTO_AUDIT_TABLE` | 周期巡检统计目标，支持逗号分隔，例如 `public.orders,public.items` | 空，使用全库采集 |
 | `AIOPS_METADATA_BACKUP_INTERVAL_SECONDS` | backup profile 的 metadata 备份周期，最小 60 秒 | `86400` |
 | `AIOPS_METADATA_BACKUP_RETENTION_DAYS` | backup profile 保留归档的天数，最小 1 天 | `30` |
+| `AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS` | SQL 审核将 EXPLAIN 估算顺序扫描标记为高风险的行数阈值 | `10000` |
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |
 | `AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS` | 从 CN/DN CSV 日志中读取近期慢语句的时间窗口 | `900` |
 | `AIOPS_SLOW_QUERY_REDACT_LITERALS` | 脱敏慢日志、活动查询和锁证据中的 SQL 字符串/数字 literal | `true` |
@@ -202,6 +202,7 @@ opentenbase-aiops/
 `cancel_query` 是独立的高风险写操作。系统只从 DN 本地锁等待证据生成建议，并要求人工批准。只有配置独立修复账号、完成隔离环境验证后，管理员才可以设置 `AIOPS_CANCEL_QUERY_ENABLED=true`。执行器会在目标 DN 重新核验 PID、用户、数据库、应用名、查询文本和事务时间，调用 `pg_cancel_backend` 后确认原查询已结束。该开关默认为关闭，不能替代 `pg_unlock` 官方扩展的版本和权限核验。
 
 `POST /api/sql-audit` 接收单条 SQL，返回规则命中和风险等级。对未命中高风险规则的 `SELECT`、`WITH`、`VALUES` 语句，可运行带超时限制的只读 `EXPLAIN (FORMAT JSON)`。多条 SQL 会被拒绝。`GET /api/distributed/nodes` 和 `POST /api/distributed/collect` 从 `pgxc_node` 发现 CN/DN，并运行内置只读检查，逐节点报告连接或查询失败。集群注册地址必须能从 API 容器访问。
+顺序扫描分析使用 `Plan Rows` 和 `AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS` 阈值，返回 `sequential_scan_review` 或 `large_sequential_scan`。它只分析单条 SQL，不执行输入语句，不估算事务总写入规模，也不是聊天 Agent 任意 SQL 工具的强制前置闸门。
 
 `AIOPS_SAFETY_REVIEW_MODEL` 可单独指定安全审查 Agent 使用的模型，留空时复用 `DEEPSEEK_MODEL`。API Base 和密钥沿用 DeepSeek 的 OpenAI 兼容配置，因此也可指向同一兼容网关上的不同模型。
 | `AIOPS_REPAIR_DB_USER` | 连接同一 CN 和数据库的普通执行账号，须与 `DB_USER` 不同 | 执行修复时必填 |

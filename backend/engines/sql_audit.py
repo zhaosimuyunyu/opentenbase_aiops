@@ -1,4 +1,5 @@
 """Deterministic SQL safety audit with an optional read-only EXPLAIN."""
+import json
 import re
 
 from psycopg2 import sql
@@ -6,6 +7,34 @@ from psycopg2.extras import RealDictCursor
 
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
+
+
+def _sequential_scan_nodes(plan):
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except json.JSONDecodeError:
+            return []
+    if isinstance(plan, list):
+        return [node for item in plan for node in _sequential_scan_nodes(item)]
+    if not isinstance(plan, dict):
+        return []
+
+    nodes = [plan] if plan.get("Node Type") == "Seq Scan" else []
+    for value in plan.values():
+        if isinstance(value, (dict, list)):
+            nodes.extend(_sequential_scan_nodes(value))
+    return nodes
+
+
+def _risk_level(findings):
+    if any(item["severity"] == "critical" for item in findings):
+        return "critical"
+    if any(item["severity"] == "high" for item in findings):
+        return "high"
+    if any(item["severity"] == "medium" for item in findings):
+        return "medium"
+    return "low"
 
 
 _RULES = (
@@ -64,18 +93,20 @@ def audit_sql(statement, *, explain=True, config=None):
         {"severity": severity, "rule": rule, "message": message}
         for severity, rule, pattern, message in _RULES if pattern.search(query)
     ]
+    settings = config or Config()
+    sequential_scan_rows = max(
+        1, int(getattr(settings, "AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS", 10000))
+    )
     result = {
         "sql": query,
-        "risk_level": "critical" if any(item["severity"] == "critical" for item in findings)
-        else ("high" if any(item["severity"] == "high" for item in findings)
-              else ("medium" if findings else "low")),
+        "risk_level": _risk_level(findings),
         "findings": findings,
         "explain": None,
         "explain_error": None,
     }
     high_risk = result["risk_level"] in {"high", "critical"}
     if explain and not high_risk and query.lower().startswith(("select", "with", "values")):
-        connector = OpenTenBaseConnector(config or Config())
+        connector = OpenTenBaseConnector(settings)
         try:
             connection = connector.connect()
             connection.set_session(readonly=True, autocommit=False)
@@ -85,6 +116,19 @@ def audit_sql(statement, *, explain=True, config=None):
                 cursor.execute(sql.SQL("EXPLAIN (FORMAT JSON) {} ").format(sql.SQL(query)))
                 row = cursor.fetchone()
                 result["explain"] = row.get("QUERY PLAN") if row else None
+                for node in _sequential_scan_nodes(result["explain"]):
+                    estimated_rows = float(node.get("Plan Rows") or 0)
+                    large_scan = estimated_rows >= sequential_scan_rows
+                    table = node.get("Relation Name") or "unknown relation"
+                    result["findings"].append({
+                        "severity": "high" if large_scan else "medium",
+                        "rule": "large_sequential_scan" if large_scan else "sequential_scan_review",
+                        "message": (
+                            f"Execution plan contains a sequential scan of {table} "
+                            f"(estimated {estimated_rows:g} rows); review filtering and indexing"
+                        ),
+                    })
+                result["risk_level"] = _risk_level(result["findings"])
             connection.rollback()
         except Exception as error:
             result["explain_error"] = {

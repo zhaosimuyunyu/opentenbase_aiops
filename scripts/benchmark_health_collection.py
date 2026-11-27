@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure read-only health collection latency against the configured cluster."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import json
 from math import ceil
@@ -78,15 +78,30 @@ def _collect(config, run_number):
     }
 
 
+def _collect_worker(config, worker_number, deadline):
+    results = []
+    while time.perf_counter() < deadline:
+        result = _collect(config, len(results) + 1)
+        result["worker"] = worker_number
+        results.append(result)
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=10, help="Serial samples, from 1 to 100")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent readers, from 1 to 16")
+    parser.add_argument(
+        "--sustain-seconds", type=int, default=0,
+        help="Optional continuous read-only collection phase, from 1 to 600 seconds",
+    )
     args = parser.parse_args()
     if not 1 <= args.runs <= 100:
         parser.error("--runs must be between 1 and 100")
     if not 1 <= args.concurrency <= 16:
         parser.error("--concurrency must be between 1 and 16")
+    if not 0 <= args.sustain_seconds <= 600:
+        parser.error("--sustain-seconds must be 0 or between 1 and 600")
 
     config = Config()
     started_at = datetime.now(timezone.utc)
@@ -99,6 +114,33 @@ def main():
             range(1, args.concurrency + 1),
         ))
     concurrent_wall_ms = round((time.perf_counter() - concurrent_started) * 1000, 2)
+
+    sustained = None
+    if args.sustain_seconds:
+        sustained_started = time.perf_counter()
+        deadline = sustained_started + args.sustain_seconds
+        sustained_results = []
+        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
+            futures = [
+                executor.submit(_collect_worker, config, worker, deadline)
+                for worker in range(1, args.concurrency + 1)
+            ]
+            for future in as_completed(futures):
+                sustained_results.extend(future.result())
+        sustained_wall_ms = round((time.perf_counter() - sustained_started) * 1000, 2)
+        sustained = {
+            "workers": args.concurrency,
+            "requested_duration_seconds": args.sustain_seconds,
+            "wall_clock_ms": sustained_wall_ms,
+            "iterations_per_worker": {
+                str(worker): sum(
+                    result["worker"] == worker for result in sustained_results
+                )
+                for worker in range(1, args.concurrency + 1)
+            },
+            **_summarize(sustained_results),
+            "samples": sustained_results,
+        }
 
     report = {
         "started_at": started_at.isoformat(),
@@ -118,6 +160,7 @@ def main():
             **_summarize(concurrent),
             "samples": concurrent,
         },
+        "sustained": sustained,
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

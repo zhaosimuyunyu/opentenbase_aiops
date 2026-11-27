@@ -4,7 +4,7 @@ from api_client import requests
 
 SAMPLE_QUERIES = [
     ("全表扫描示例", "SELECT * FROM orders WHERE status = 'pending';"),
-    ("大事务示例", "BEGIN; DELETE FROM logs WHERE created_at < '2024-01-01'; UPDATE stats SET total = 0;"),
+    ("多语句拒绝示例", "BEGIN; DELETE FROM logs WHERE created_at < '2024-01-01'; UPDATE stats SET total = 0;"),
     ("缺少索引条件", "SELECT * FROM users;"),
     ("安全查询示例", "SELECT id, name FROM users WHERE id = 1;"),
     ("带条件更新", "UPDATE orders SET status = 'done' WHERE id = 42;"),
@@ -18,7 +18,7 @@ def render(config):
             <div class="page-breadcrumb">OPENTENBASE AIOPS / 质量</div>
             <div class="page-title">SQL 审核</div>
             <div class="page-description">
-                上线前自动扫描 SQL 风险，拦截全表扫描、大事务、高风险 DDL 等操作，提供只读 EXPLAIN 分析
+                对单条 SQL 做静态风险检查和只读 EXPLAIN；按估算扫描行数标记顺序扫描风险，不会执行 SQL 或阻断外部发布流程
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -58,18 +58,14 @@ def render(config):
         st.markdown("#### 审核规则说明")
         st.markdown("""
             <div class="card" style="font-size:0.85rem; line-height:1.7;">
-                <div style="margin-bottom:.75rem; font-weight:700; color:var(--error);">🚨 高风险规则</div>
-                <div>• 全表扫描（无 WHERE 条件）</div>
-                <div>• DROP TABLE / DROP DATABASE</div>
-                <div>• TRUNCATE 表操作</div>
-                <div style="margin-top:.75rem; margin-bottom:.75rem; font-weight:700; color:var(--warning);">⚠️ 中等风险规则</div>
-                <div>• UPDATE / DELETE 无 WHERE</div>
-                <div>• 大事务（多语句）</div>
-                <div>• 修改核心系统表</div>
-                <div style="margin-top:.75rem; margin-bottom:.75rem; font-weight:700; color:var(--info);">ℹ️ 低风险规则</div>
-                <div>• SELECT *（建议指定列名）</div>
-                <div>• 缺少 LIMIT 子句</div>
-                <div>• 不推荐的函数使用</div>
+                <div style="margin-bottom:.75rem; font-weight:700; color:var(--error);">🚨 高风险</div>
+                <div>• 大表顺序扫描（EXPLAIN 估算行数达到配置阈值）</div>
+                <div>• 无条件 DELETE / UPDATE、DROP、TRUNCATE</div>
+                <div>• 权限变更、终止会话和事务恢复函数</div>
+                <div style="margin-top:.75rem; margin-bottom:.75rem; font-weight:700; color:var(--warning);">⚠️ 需要复核</div>
+                <div>• 小表顺序扫描和 SELECT *</div>
+                <div>• ALTER TABLE / ALTER SYSTEM</div>
+                <div>• 多语句请求会被拒绝；事务规模尚不估算</div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -106,12 +102,13 @@ def display_audit_result(result, original_sql):
     """Display SQL audit results"""
 
     risk_level = result.get('risk_level', 'unknown')
-    rules_hit = result.get('rules', [])
+    rules_hit = result.get('findings', result.get('rules', []))
     explain_result = result.get('explain')
     explain_error = result.get('explain_error')
 
     # Risk level banner
     risk_map = {
+        'critical': ('error', '🚨', '严重风险 — 不要执行此 SQL'),
         'high':   ('error',   '🚨', '高风险 — 建议拦截此 SQL'),
         'medium': ('warning', '⚠️', '中等风险 — 请仔细确认后执行'),
         'low':    ('info',    'ℹ️', '低风险 — 注意优化建议'),
@@ -137,10 +134,18 @@ def display_audit_result(result, original_sql):
         if rules_hit:
             for rule in rules_hit:
                 sev = rule.get('severity', 'low')
-                sev_colors = {'high': 'var(--error)', 'medium': 'var(--warning)', 'low': 'var(--info)'}
+                sev_colors = {
+                    'critical': 'var(--error)', 'high': 'var(--error)',
+                    'medium': 'var(--warning)', 'low': 'var(--info)',
+                }
                 sev_color = sev_colors.get(sev, 'var(--text-secondary)')
-                sev_labels = {'high': '高风险', 'medium': '中等风险', 'low': '低风险'}
+                sev_labels = {
+                    'critical': '严重风险', 'high': '高风险',
+                    'medium': '中等风险', 'low': '低风险',
+                }
                 sev_label = sev_labels.get(sev, sev)
+                rule_name = rule.get('rule', rule.get('name', '未知规则'))
+                rule_description = rule.get('message', rule.get('description', ''))
 
                 st.markdown(f"""
                     <div style="
@@ -152,11 +157,11 @@ def display_audit_result(result, original_sql):
                         margin-bottom: 0.75rem;
                     ">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem;">
-                            <strong style="font-size:.9rem;">{rule.get('name', '未知规则')}</strong>
+                            <strong style="font-size:.9rem;">{rule_name}</strong>
                             <span style="font-size:.7rem; font-weight:700; color:{sev_color};">{sev_label}</span>
                         </div>
                         <div style="color:var(--text-secondary); font-size:.82rem; line-height:1.5;">
-                            {rule.get('description', '')}
+                            {rule_description}
                         </div>
                         {f'<div style="margin-top:.4rem; color:var(--text-tertiary); font-size:.78rem;">建议: {rule.get("suggestion","")}</div>' if rule.get("suggestion") else ''}
                     </div>

@@ -12,7 +12,7 @@
 | 智能化监控 | 每 900 秒执行只读健康巡检，支持 SSE 和审计持久化 | `/api/automation/status` 和巡检历史 | 已运行，当前部分目录/统计检查受既有锁超时影响 |
 | 会话异常诊断 | CN/DN 锁等待、阻塞会话身份和 prepared transaction 证据 | `backend/tools/simulate_lock_wait.py` 模拟真实 DN advisory lock 等待 | 已演示 |
 | 慢 SQL 分析 | 读取 CN/DN 的 `pg_stat_activity` 与 CSV 慢语句日志，结合 SQL 风险检查、只读 `EXPLAIN` 和 AI 建议 | `backend/tools/simulate_slow_query.py` 经 CN 入口运行超过数据库日志阈值的 `pg_sleep`，自然结束后由 SSE 巡检从 CN/DN 日志捕获 PID、SQL 和耗时 | 已验证已完成语句的日志诊断 |
-| SQL 审核 | 静态风险规则和受支持语句的只读 explain | SQL 审核 API 与测试套件 | 已演示，尚未接入发布流水线 |
+| SQL 审核 | 静态危险语句规则；单条 SELECT 的只读 EXPLAIN；按配置行数阈值标记顺序扫描 | `tests/test_sql_audit.py` 覆盖小表复核和大扫描高风险；真实 OpenTenBase API 验证 `pg_class` EXPLAIN 产生 `large_sequential_scan` | 部分完成：多语句请求被拒绝，但不估算事务写入规模、不接入外部发布流水线，也不拦截聊天 Agent 的 SQL 执行 |
 | 知识库 | 固定版本 OpenTenBase 文档和源码引用，存于 pgvector | 68 份资料、3502 个向量块和在线检索回归 | 已演示 |
 | 部署 | Docker Compose、健康检查、重启策略和定时只读巡检 | `docker compose ps`、`/health` | 已运行 |
 
@@ -68,3 +68,7 @@ Stop-Transcript
 仅有本仓库提交不能证明课程的开源贡献项。学生还需向上游提交 Issue、文档/工具贡献或 PR，并保存社区链接、讨论和根据反馈修改的记录。我不会代发该社区 Issue。
 
 理论学习占 20%，还需由课程课堂参与记录或技术文章证明，无法从本仓库确认。
+
+### SQL 审核补充
+
+SQL 审核已包含静态危险语句规则、只读 `EXPLAIN (FORMAT JSON)` 和顺序扫描估算。`Plan Rows` 达到 `AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS` 时标记 `large_sequential_scan`，否则标记 `sequential_scan_review`。该入口不执行 SQL、不估算事务总写入量，也不拦截聊天 Agent 的任意 SQL。课程演示可展示真实 OpenTenBase `pg_class` EXPLAIN 结果和风险 finding，不能宣称已接入生产发布流水线。

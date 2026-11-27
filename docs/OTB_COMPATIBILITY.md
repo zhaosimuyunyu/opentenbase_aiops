@@ -154,6 +154,10 @@ API `/health` 现在同时检查 OpenTenBase 和用于审计/会话持久化的 
 
 压测前后审计记录数从 205 增至 206。新增记录 ID `007e1fd7-56e4-400f-aba5-c73af88fa7a3` 的 `trigger=scheduled`，由同时运行的周期巡检产生；benchmark 本身只实例化只读采集器，不写审计表。
 
+### 2026-11-27 持续采集复测
+
+使用 `--runs 3 --concurrency 2 --sustain-seconds 30` 对同一实验集群执行持续只读采集。持续阶段实际运行 30.26 秒，2 个 worker 共完成 230 次采集，230/230 为 `success`，错误数为 0，SQLSTATE 错误为空。采集耗时中位数 266.75 ms、最近秩 P95 308.59 ms、最大 339.81 ms。该结果用于验证短时错误不会累积和延迟没有明显失控，不构成生产容量或 SLO 承诺。
+
 ### 2026-11-26 周期巡检续跑与 AI 阶段耗时
 
 API 容器重启后，自动巡检配置仍为 enabled、900 秒间隔。调度器在上一条 scheduled 记录超过去重窗口后自然生成新记录 `78666cb2-149f-4470-bdf1-5adffec81f77`，采集状态为 `success`，没有 fallback，Prometheus 周期时间戳随之更新。该轮 collector 耗时为 330.79 ms。

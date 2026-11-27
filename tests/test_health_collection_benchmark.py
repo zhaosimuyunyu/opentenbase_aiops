@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from scripts.benchmark_health_collection import _collect, _nearest_rank, _summarize
+from scripts.benchmark_health_collection import (
+    _collect,
+    _collect_worker,
+    _nearest_rank,
+    _summarize,
+)
 
 
 class HealthCollectionBenchmarkTests(unittest.TestCase):
@@ -29,6 +34,19 @@ class HealthCollectionBenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["p95_ms_nearest_rank"], 30.0)
         self.assertEqual(summary["max_ms"], 30.0)
         self.assertEqual(summary["error_count"], 3)
+
+    @patch("scripts.benchmark_health_collection._collect")
+    @patch("scripts.benchmark_health_collection.time.perf_counter", side_effect=[0, 0, 1])
+    def test_sustained_worker_collects_until_the_shared_deadline(self, _clock, collect):
+        collect.side_effect = [
+            {"run": 1, "status": "success", "duration_ms": 10.0, "errors": {}},
+            {"run": 2, "status": "success", "duration_ms": 12.0, "errors": {}},
+        ]
+
+        results = _collect_worker(object(), worker_number=2, deadline=1)
+
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(result["worker"] == 2 for result in results))
 
     @patch("scripts.benchmark_health_collection.ReadonlyHealthCollector")
     def test_sample_reports_error_type_and_sqlstate_without_raw_message(self, collector_type):

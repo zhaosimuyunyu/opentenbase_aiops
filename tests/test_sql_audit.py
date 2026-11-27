@@ -21,6 +21,44 @@ class SqlAuditTests(unittest.TestCase):
         self.assertTrue(connection.rollback.called)
         self.assertEqual(cursor.execute.call_count, 3)
 
+    def test_large_sequential_scan_is_high_risk_after_read_only_explain(self):
+        connector = MagicMock()
+        connection = connector.return_value.connect.return_value
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = {"QUERY PLAN": [{"Plan": {
+            "Node Type": "Seq Scan", "Relation Name": "events", "Plan Rows": 125000,
+        }}]}
+        config = type("Config", (), {"AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS": 10000})()
+        with patch("backend.engines.sql_audit.OpenTenBaseConnector", connector):
+            result = audit_sql("SELECT * FROM events", config=config)
+
+        self.assertEqual(result["risk_level"], "high")
+        self.assertEqual(result["findings"][-1]["rule"], "large_sequential_scan")
+        self.assertIn("125000 rows", result["findings"][-1]["message"])
+
+    def test_small_sequential_scan_is_review_finding_not_high_risk(self):
+        connector = MagicMock()
+        connection = connector.return_value.connect.return_value
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = {"QUERY PLAN": [{"Plan": {
+            "Node Type": "Seq Scan", "Relation Name": "lookup", "Plan Rows": 42,
+        }}]}
+        with patch("backend.engines.sql_audit.OpenTenBaseConnector", connector):
+            result = audit_sql("SELECT id FROM lookup")
+
+        self.assertEqual(result["risk_level"], "medium")
+        self.assertEqual(result["findings"][-1]["rule"], "sequential_scan_review")
+
+    def test_sequential_scans_are_found_recursively(self):
+        from backend.engines.sql_audit import _sequential_scan_nodes
+
+        plan = {"Plan": {"Node Type": "Hash Join", "Plans": [
+            {"Node Type": "Index Scan"},
+            {"Node Type": "Seq Scan", "Relation Name": "events"},
+        ]}}
+
+        self.assertEqual(_sequential_scan_nodes(plan), [plan["Plan"]["Plans"][1]])
+
     def test_multiple_statements_are_rejected(self):
         with self.assertRaises(ValueError):
             audit_sql("SELECT 1; DROP TABLE public.orders")

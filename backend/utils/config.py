@@ -79,6 +79,9 @@ class Config:
     APP_PORT: int = int(os.getenv("APP_PORT", "8080"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     AIOPS_API_KEY: str = os.getenv("AIOPS_API_KEY", "")
+    AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS: int = max(
+        1, int(os.getenv("AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS", "10000"))
+    )
     AIOPS_CORS_ORIGINS = tuple(
         origin.strip() for origin in os.getenv("AIOPS_CORS_ORIGINS", "*").split(",")
         if origin.strip()
