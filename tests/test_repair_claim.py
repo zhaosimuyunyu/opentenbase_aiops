@@ -145,6 +145,51 @@ class RepairClaimTests(unittest.TestCase):
                 )
             store.assert_not_called()
 
+    def test_analyze_preflight_uses_audit_connection_for_data_node_fanout(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(
+            AIOPS_REPAIR_DB_USER="repair_operator",
+            AIOPS_REPAIR_DB_PASSWORD="repair-secret",
+            DB_USER="auditor", DB_PASSWORD="audit-secret",
+            DB_HOST="cn", DB_PORT=11003, DB_NAME="lab",
+            audit_target={"host": "cn", "port": 11003, "database": "lab"},
+            AIOPS_REPAIR_FUNCTION_ENABLED=False,
+        )
+        repair_connection = MagicMock()
+        repair_connection.cursor.return_value.__enter__.return_value.fetchone.return_value = (
+            "fixture-system-id", "lab", "repair_operator", False,
+        )
+        audit_connection = MagicMock()
+        stats = {
+            "nodes": [{
+                "node_name": "dn1", "relation_oid": 123,
+                "live_tuples": 5000, "modifications_since_analyze": 1500,
+                "execution_user_is_owner": True,
+            }],
+        }
+        with patch(
+            "backend.engines.repair_workflow.OpenTenBaseConnector"
+        ) as connector, patch.object(
+            workflow, "_read_data_node_stats", return_value=stats
+        ) as read_stats, patch.object(
+            workflow, "_repair_function_available", return_value=False
+        ):
+            connector.return_value.connect.side_effect = [repair_connection, audit_connection]
+            workflow._preflight_analyze_target("public.orders", {
+                "database_identity": {
+                    "system_identifier": "fixture-system-id", "database": "lab",
+                },
+                "nodes": [{"node_name": "dn1", "relation_oid": 123}],
+            })
+
+        read_stats.assert_called_once_with(
+            audit_connection, "public", "orders", execution_user="repair_operator",
+        )
+        self.assertEqual(connector.call_count, 2)
+        self.assertIsNot(connector.call_args_list[0].args[0], connector.call_args_list[1].args[0])
+        repair_connection.rollback.assert_called()
+        self.assertEqual(connector.return_value.close.call_count, 2)
+
     def test_proposal_preflight_checks_database_identity_and_target_before_model(self):
         workflow = RepairWorkflow()
         workflow.config = MagicMock(

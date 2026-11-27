@@ -182,6 +182,12 @@ Operational memory 当前查询为空是预期结果，因为现场没有配置�
 
 使用该审计的 `prepared_transaction_blocker` finding 分别向 `analyze_table` 和 `cancel_query` 提案接口发起负向验收，两者均在创建修复请求前返回 HTTP 400；`ANALYZE` 因 finding 类型不符被拒绝，`cancel_query` 因缺少逐 DN blocker 身份被拒绝。请求总数前后均为 8，没有新增执行或审批记录。
 
+### 2026-11-27 独立账号 ANALYZE 端到端验收
+
+在 `lab` 创建唯一命名的复制测试表，使用独立非超级用户作为表 owner，在 DN1、DN2 各插入 3000 行并只对该临时表关闭 autovacuum。真实健康巡检 `a82df8c0-f6c3-4d0f-ae3f-526420ebc4e2` 通过 API 发现两个 DN 的 stale statistics，AI 分析未 fallback 并返回 6 条知识引用。随后实际调用提案、具名人工审批和执行 API，全部返回 HTTP 200；修复请求 `b2625ee1-0164-4d78-b122-b55f3207f51a` 状态为 `executed`，数据库 `session_user` 为临时非超级用户。执行前两个 DN 均有 3000 次未分析修改；执行后 DN1、DN2 的表 OID 同为 73878，两边 `last_analyze` 均推进，后置验证为 `verified=true`。测试结束后已删除测试表、临时角色和本轮审计、修复、memory 记录，确认残留数均为 0。
+
+本次验收修正了真实提案路径的权限边界：OpenTenBase 限制非超级用户使用 `EXECUTE DIRECT`，因此逐 DN 统计扇出由巡检连接执行，并在同一查询中检查修复账号是否为每个目标 DN 的表 owner；实际写入仍由独立非超级修复账号完成。配置管理员 `SECURITY DEFINER` 分析函数的临时验证返回 `permission denied to set session authorization opentenbase`，因此上述成功验收走逐节点 owner 校验路径，没有启用该函数路径。该函数兼容问题尚未解决。
+
 ### 数据节点目录分段复测
 
 在当前实验集群上，通过 CN 对 DN1 和 DN2 执行相同的只读 `pg_class` 计数查询。查询限定普通表（`relkind = 'r'`），锁超时为 300 ms，语句超时为 2 秒。

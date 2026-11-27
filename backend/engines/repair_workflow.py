@@ -2,6 +2,7 @@ import re
 import hmac
 import hashlib
 import json
+import logging
 import uuid
 from copy import copy
 from time import sleep
@@ -18,6 +19,7 @@ from ..utils.operations_store import OperationsStore
 
 
 ALLOWED_OPERATIONS = {"analyze_table", "cancel_query"}
+logger = logging.getLogger(__name__)
 
 
 def _table_name(value):
@@ -510,9 +512,16 @@ class RepairWorkflow:
             if identity[2] != repair_user or identity[3] is not False:
                 raise ValueError("Repair proposals require the configured dedicated non-superuser account")
             schema_name, table_name = table.split(".", 1)
-            stats = self._read_data_node_stats(
-                connection, schema_name, table_name, execution_user=repair_user
-            )
+            stats_reader = OpenTenBaseConnector(self.config)
+            try:
+                stats_connection = stats_reader.connect()
+                stats_connection.set_session(readonly=True, autocommit=False)
+                stats = self._read_data_node_stats(
+                    stats_connection, schema_name, table_name,
+                    execution_user=repair_user,
+                )
+            finally:
+                stats_reader.close()
             audited_relations = {
                 item["node_name"]: item.get("relation_oid")
                 for item in observation.get("nodes", [])
@@ -1049,7 +1058,7 @@ class RepairWorkflow:
                 if operation == "analyze_table":
                     try:
                         self._save_analyze_memory(
-                            audit_id=row[3], table=table, evidence=reviews,
+                            audit_id=audit_id, table=table, evidence=reviews,
                             result=result, status=status, request_id=request_id,
                         )
                     except Exception:
