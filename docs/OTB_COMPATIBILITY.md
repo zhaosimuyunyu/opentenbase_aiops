@@ -188,6 +188,8 @@ Operational memory 当前查询为空是预期结果，因为现场没有配置�
 
 本次验收修正了真实提案路径的权限边界：OpenTenBase 限制非超级用户使用 `EXECUTE DIRECT`，因此逐 DN 统计扇出由巡检连接执行，并在同一查询中检查修复账号是否为每个目标 DN 的表 owner；实际写入仍由独立非超级修复账号完成。配置管理员 `SECURITY DEFINER` 分析函数的临时验证返回 `permission denied to set session authorization opentenbase`，因此上述成功验收走逐节点 owner 校验路径，没有启用该函数路径。该函数兼容问题尚未解决。
 
+将同一流程固化为 `scripts/verify_analyze_repair.py` 后，以 README 命令再次运行成功。审计 `b4f1bdd0-a571-4809-9995-4bb96fb1f48c` 和请求 `7002fbdb-e753-4ee3-9cf2-7d7e1d07a76a` 均走真实 API；模型未 fallback、返回 6 条知识引用，审批执行 HTTP 200，状态 `executed`。实际 session user 是临时非超级用户，DN1/DN2 的 OID 同为 73886，`last_analyze` 均推进，`postcondition.verified=true`，脚本输出 `status=passed` 且 `cleanup_errors=[]`。
+
 ### 数据节点目录分段复测
 
 在当前实验集群上，通过 CN 对 DN1 和 DN2 执行相同的只读 `pg_class` 计数查询。查询限定普通表（`relkind = 'r'`），锁超时为 300 ms，语句超时为 2 秒。

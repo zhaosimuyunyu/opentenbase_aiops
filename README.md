@@ -224,6 +224,14 @@ docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py --re
 
 第三条命令使用独立执行账号检查登录和数据库身份。巡检账号的逐 DN 权限通过前两条命令验证。执行账号的表锁可在隔离表上加 `--repair-lock --table public.orders` 验证，`ANALYZE` 权限需通过执行验收。
 
+对隔离数据库完整验证健康巡检、独立账号提案、人工审批、`ANALYZE` 和逐 DN 后置条件，可运行：
+
+```powershell
+docker compose exec -T aiops-api python scripts/verify_analyze_repair.py --database lab
+```
+
+该脚本使用 OpenTenBase 管理连接创建随机命名的临时表和非超级用户，只对这个临时对象执行写入与 `ANALYZE`。执行结束后会删除临时表、角色及对应的审计、修复和 memory 记录。要求当前账号有创建/删除角色和对象的权限，`lab` 中存在 `default_group`，且已配置可用的 DeepSeek 和知识库服务。完成验收后应检查 JSON 输出中的 `status=passed`、`request_status=executed` 和 `postcondition.verified=true`。
+
 使用报告中的 `summary` 判断探测结果。节点可达且 CN 可连接时，统计查询仍可能失败。请查看具体失败项和错误原因。兼容性探测和全库巡检的验收范围见 [OpenTenBase 兼容性记录](docs/OTB_COMPATIBILITY.md)。
 
 ## 📚 使用指南
