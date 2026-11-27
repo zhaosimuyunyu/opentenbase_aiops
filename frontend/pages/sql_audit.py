@@ -1,6 +1,6 @@
 """SQL Audit Page - SQL 审核"""
 import streamlit as st
-import requests
+from api_client import requests
 
 SAMPLE_QUERIES = [
     ("全表扫描示例", "SELECT * FROM orders WHERE status = 'pending';"),

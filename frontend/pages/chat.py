@@ -1,6 +1,6 @@
 """AI Chat Assistant Page - 智能助手"""
 import streamlit as st
-import requests
+from api_client import requests
 import json
 import uuid
 

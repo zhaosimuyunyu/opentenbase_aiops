@@ -1,5 +1,6 @@
 """FastAPI application (optional REST API)"""
 import asyncio
+import hmac
 import json
 import os
 import socket
@@ -85,11 +86,30 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.AIOPS_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_api_key(request, call_next):
+    protected_path = (
+        request.url.path.startswith("/api/")
+        or request.url.path in {"/", "/metrics"}
+    )
+    if config.AIOPS_API_KEY and protected_path:
+        scheme, _, supplied_key = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(
+            supplied_key, config.AIOPS_API_KEY
+        ):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "A valid Bearer API key is required"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
 
 # Initialize components
 db_connector = OpenTenBaseConnector(config)
@@ -302,6 +322,7 @@ async def health_check():
                 "model": config.DEEPSEEK_MODEL if config.DEEPSEEK_API_KEY else None,
             },
         },
+        security={"api_key_authentication": bool(config.AIOPS_API_KEY)},
     )
     return JSONResponse(
         readiness,

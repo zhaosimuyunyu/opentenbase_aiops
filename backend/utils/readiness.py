@@ -1,4 +1,4 @@
-def build_readiness(database_status, metadata_status, capabilities=None):
+def build_readiness(database_status, metadata_status, capabilities=None, security=None):
     components = {
         "opentenbase": database_status,
         "metadata_database": metadata_status,
@@ -9,4 +9,5 @@ def build_readiness(database_status, metadata_status, capabilities=None):
         "api": "healthy" if ready else "degraded",
         "components": components,
         "capabilities": capabilities or {},
+        "security": security or {},
     }

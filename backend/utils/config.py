@@ -78,6 +78,11 @@ class Config:
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
     APP_PORT: int = int(os.getenv("APP_PORT", "8080"))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    AIOPS_API_KEY: str = os.getenv("AIOPS_API_KEY", "")
+    AIOPS_CORS_ORIGINS = tuple(
+        origin.strip() for origin in os.getenv("AIOPS_CORS_ORIGINS", "*").split(",")
+        if origin.strip()
+    )
     AIOPS_APPROVAL_TOKEN: str = os.getenv("AIOPS_APPROVAL_TOKEN", "")
     AIOPS_APPROVER_TOKENS: str = os.getenv("AIOPS_APPROVER_TOKENS", "")
     AIOPS_APPROVER_ID: str = os.getenv("AIOPS_APPROVER_ID", "local-operator")

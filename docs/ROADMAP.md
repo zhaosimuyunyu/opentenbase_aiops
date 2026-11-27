@@ -20,6 +20,7 @@
 - 提交 `595aa09` 增加可重复执行的历史数据清理命令。先 dry-run 扫描审计、修复请求/事件和运维记忆记录，再以 `--apply` 按批处理并通过旧值条件避免覆盖并发更新。本环境 dry-run 找到 19 行，执行更新 19 行，随后复查为 0 行待更新。
 - 本地完整 pytest 为 140 passed、4 skipped、14 个子测试 passed；GitHub Actions 对 `595aa09` 的 Python 测试和 Docker build 均成功。
 - 重建后的 API 容器健康，`/health` 确认 OpenTenBase v5.0 与 pgvector metadata PostgreSQL 均连接成功，AI 配置可用。
+- 增加可选共享 Bearer API key，保护 `/api/*`、`/metrics` 和根路径，`/health` 留给容器探针；Streamlit 只在服务端向 API 附加 key。临时 key 实测无认证返回 401、有效认证返回 200，配置状态由 `/health` 暴露。该门禁不是用户身份系统，也没有 RBAC、key 轮换管理或速率限制，生产身份治理仍未完成。
 - 复跑真实 `lab` 场景的 `scripts/verify_analyze_repair.py` 成功：模型未回退，引用 6 条知识，具名人工审批后以临时非超级用户执行 `ANALYZE`，两个 DN 后置验证通过，临时对象和关联记录已清理。
 - SQL 脱敏迁移只覆盖审计、修复及 operational memory JSON 字段。交互式 Agent 会话文本、问答历史、其它任意文本列不在本次迁移范围内；SQL 执行审计只存 SQL SHA-256，不存 SQL 原文。若这些文本可能包含敏感值，仍需定义文本保留与脱敏策略。
 - 本次结果证明功能闭环在一套课程实验集群可运行，不证明生产身份认证、密钥管理、代表性负载性能、备份恢复、HA/多副本 API 或生产级变更回滚已经完成。

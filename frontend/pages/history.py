@@ -1,6 +1,6 @@
 """Audit History Page - 巡检历史"""
 import streamlit as st
-import requests
+from api_client import requests
 from datetime import datetime
 
 def render(config):

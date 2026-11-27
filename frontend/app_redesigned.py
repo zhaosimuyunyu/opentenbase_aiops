@@ -2,7 +2,7 @@
 import streamlit as st
 import sys
 import os
-import requests
+from api_client import requests
 import json
 import html
 from pathlib import Path

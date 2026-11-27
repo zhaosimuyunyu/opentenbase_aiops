@@ -9,7 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
-import requests
+from api_client import requests
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent.parent

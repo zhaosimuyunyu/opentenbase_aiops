@@ -1,6 +1,6 @@
 """Repair Center Page - 修复中心"""
 import streamlit as st
-import requests
+from api_client import requests
 
 def render(config):
     """Render repair center page"""

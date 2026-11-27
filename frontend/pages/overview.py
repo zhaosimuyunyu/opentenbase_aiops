@@ -1,6 +1,6 @@
 """Cluster Overview Page - 集群总览"""
 import streamlit as st
-import requests
+from api_client import requests
 import html
 from datetime import datetime
 from frontend.cluster_status import cluster_health_banner

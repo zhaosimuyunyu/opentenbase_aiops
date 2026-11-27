@@ -1,6 +1,6 @@
 """AI Health Audit Page - AI 健康巡检"""
 import streamlit as st
-import requests
+from api_client import requests
 import json
 from datetime import datetime
 
