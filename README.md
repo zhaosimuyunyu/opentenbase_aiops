@@ -245,6 +245,13 @@ docker compose exec -T aiops-api python scripts/verify_analyze_repair.py --datab
 
 巡检同时读取各 CN/DN 最近的 CSV 慢语句日志，只报告配置时间窗口内完成的语句。仅当 OpenTenBase 的 `log_min_duration_statement` 启用时，超过数据库阈值的语句会进入巡检证据。默认会将 SQL 字符串和数字 literal 替换为占位符、移除注释并保留脱敏语句形状指纹；`AIOPS_SLOW_QUERY_REDACT_LITERALS=false` 会让 literal 进入审计和模型上下文，仅应在隔离调试环境使用。升级前已写入数据库的历史行不会自动改写，相关审计和修复读取接口会在返回及重新分析前脱敏。
 
+升级后如需清理旧版保存的 SQL literal，可在 API 容器先运行默认只读预览，再显式执行更新。迁移覆盖审计、修复请求与事件、以及运维记忆 JSON 中的嵌套 `query` 字段，按批次提交并避免覆盖扫描期间被修改的行。
+
+```bash
+docker compose exec -T aiops-api python -m scripts.sanitize_historical_sql
+docker compose exec -T aiops-api python -m scripts.sanitize_historical_sql --apply
+```
+
 ### 智能问答
 
 1. 进入 "💬 智能问答" 页面
