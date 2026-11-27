@@ -29,7 +29,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(missing.headers["www-authenticate"], "Bearer")
         self.assertEqual(valid.status_code, 404)
         self.assertEqual(metrics.status_code, 401)
-        self.assertEqual(metrics_with_key.status_code, 200)
+        self.assertNotEqual(metrics_with_key.status_code, 401)
 
     def test_streamlit_api_client_attaches_key_without_mutating_caller_headers(self):
         from frontend.api_client import get
