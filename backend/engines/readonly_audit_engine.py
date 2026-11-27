@@ -26,6 +26,77 @@ def _ensure_audit_schema(cursor):
         status text default 'pending')""")
 
 
+def _summarize_slow_query_logs(records, *, pattern_limit=20):
+    groups = {}
+    for record in records:
+        fingerprint = record.get('query_fingerprint') or record.get('query') or 'unknown'
+        key = (record.get('node_name'), fingerprint)
+        group = groups.get(key)
+        duration = float(record.get('duration_ms') or 0)
+        logged_at = record.get('logged_at')
+        if group is None:
+            group = {
+                'node_name': record.get('node_name'),
+                'query_fingerprint': fingerprint,
+                'execution_count': 0,
+                'total_duration_ms': 0.0,
+                'max_duration_ms': 0.0,
+                'latest_logged_at': logged_at,
+                'sample_query': record.get('query'),
+            }
+            groups[key] = group
+        group['execution_count'] += 1
+        group['total_duration_ms'] += duration
+        group['max_duration_ms'] = max(group['max_duration_ms'], duration)
+        if logged_at is not None and (
+            group['latest_logged_at'] is None or logged_at > group['latest_logged_at']
+        ):
+            group['latest_logged_at'] = logged_at
+
+    patterns = sorted(
+        groups.values(),
+        key=lambda group: (
+            -group['total_duration_ms'],
+            -group['execution_count'],
+            group['node_name'] or '',
+            group['query_fingerprint'],
+        ),
+    )
+    for pattern in patterns:
+        pattern['total_duration_ms'] = round(pattern['total_duration_ms'], 2)
+        pattern['max_duration_ms'] = round(pattern['max_duration_ms'], 2)
+    return {
+        'execution_count': len(records),
+        'pattern_count': len(patterns),
+        'omitted_pattern_count': max(0, len(patterns) - pattern_limit),
+        'patterns': patterns[:pattern_limit],
+    }
+
+
+def _build_analysis_evidence(evidence):
+    """Keep full query evidence persisted while bounding the model context."""
+    analysis_evidence = dict(evidence)
+    performance = dict(evidence.get('performance') or {})
+    slow_queries = performance.get('slow_query_logs') or []
+    slow_query_summary = _summarize_slow_query_logs(slow_queries)
+    performance['slow_query_logs'] = slow_query_summary
+    analysis_evidence['performance'] = performance
+
+    findings = []
+    for finding in evidence.get('findings') or []:
+        analysis_finding = dict(finding)
+        if finding.get('check') == 'long_running_queries':
+            query_rows = finding.get('evidence') or []
+            active_queries = [
+                row for row in query_rows
+                if row.get('source') != 'server_csv_log'
+            ]
+            analysis_finding['evidence'] = active_queries
+        findings.append(analysis_finding)
+    analysis_evidence['findings'] = findings
+    return analysis_evidence
+
+
 class ReadonlyAuditEngine:
     def __init__(self, config=None):
         self.config = config or Config()
@@ -499,7 +570,9 @@ class ReadonlyAuditEngine:
             if progress:
                 progress("diagnosing")
             analysis_started = time.perf_counter()
-            analysis = await self._diagnose_with_budget(issue, evidence)
+            analysis = await self._diagnose_with_budget(
+                issue, _build_analysis_evidence(evidence)
+            )
             evidence['analysis_duration_ms'] = round(
                 (time.perf_counter() - analysis_started) * 1000, 2
             )

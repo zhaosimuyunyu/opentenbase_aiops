@@ -101,7 +101,15 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         slow_queries = [{
             "node_name": "cn0001", "pid": 42, "application_name": "course-demo",
             "duration_ms": 12015.69, "query": "SELECT pg_sleep(12)",
-            "source": "server_csv_log",
+            "logged_at": "2026-11-28T10:00:00+00:00", "source": "server_csv_log",
+        }, {
+            "node_name": "cn0001", "pid": 43, "application_name": "course-demo",
+            "duration_ms": 13000, "query": "SELECT pg_sleep(13)",
+            "logged_at": "2026-11-28T10:01:00+00:00", "source": "server_csv_log",
+        }, {
+            "node_name": "cn0001", "pid": 44, "application_name": "course-demo",
+            "duration_ms": 22000, "query": "SELECT pg_sleep(22)",
+            "logged_at": "2026-11-28T10:02:00+00:00", "source": "server_csv_log",
         }]
         snapshot = {
             "status": "success", "errors": {},
@@ -117,20 +125,39 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
         ) as collector, patch.object(
             ReadonlyAuditEngine, "_diagnose",
             new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []}),
-        ):
+        ) as diagnose:
             collector.return_value.collect.return_value = snapshot
             result = await ReadonlyAuditEngine().run_health_audit()
 
-        redacted_query, fingerprint = redact_sql_literals("SELECT pg_sleep(12)")
-        expected_query = {
-            **slow_queries[0],
-            "query": redacted_query,
-            "query_fingerprint": fingerprint,
-            "query_redacted": True,
-        }
+        redacted_queries = []
+        for row in slow_queries:
+            redacted_query, fingerprint = redact_sql_literals(row["query"])
+            redacted_queries.append({
+                **row,
+                "query": redacted_query,
+                "query_fingerprint": fingerprint,
+                "query_redacted": True,
+            })
         finding = next(item for item in result["findings"] if item["check"] == "long_running_queries")
-        self.assertEqual(finding["evidence"], [expected_query])
-        self.assertEqual(result["evidence"]["performance"]["slow_query_logs"], [expected_query])
+        self.assertEqual(finding["evidence"], redacted_queries)
+        self.assertEqual(result["evidence"]["performance"]["slow_query_logs"], redacted_queries)
+
+        model_evidence = diagnose.await_args.args[1]
+        summary = model_evidence["performance"]["slow_query_logs"]
+        self.assertEqual(summary["execution_count"], 3)
+        self.assertEqual(summary["pattern_count"], 1)
+        self.assertEqual(summary["patterns"][0]["execution_count"], 3)
+        self.assertEqual(summary["patterns"][0]["total_duration_ms"], 47015.69)
+        model_finding = next(
+            item for item in model_evidence["findings"]
+            if item["check"] == "long_running_queries"
+        )
+        self.assertEqual(model_finding["evidence"], [])
+        self.assertEqual(
+            model_evidence["performance"]["slow_query_logs"]["execution_count"],
+            len(slow_queries),
+        )
+        self.assertEqual(diagnose.await_count, 1)
 
     async def test_prepared_transaction_reports_missing_official_record_diagnostic(self):
         module = "backend.engines.readonly_audit_engine"
