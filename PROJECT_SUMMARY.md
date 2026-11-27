@@ -305,20 +305,20 @@ docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py
 
 ### Docker Compose 一键部署
 
-Compose 自动创建应用网络。OpenTenBase 可以部署在裸机、虚拟机、远程服务器或容器中，连接配置见 [README](README.md#opentenbase-连接)。
+Compose 自动创建应用网络。配置可达的 OpenTenBase CN 地址、SQL 端口、数据库和账号，即可通过 PostgreSQL 协议接入裸机、虚拟机、远程服务器或容器中的 OpenTenBase。分布式巡检、日志和修复能力需按节点可达性、版本和权限单独验收。连接方式和验证命令见 [README](README.md#opentenbase-连接)。
 
 ### 启动命令
 
 ```bash
 # 1. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+# 编辑 .env，填写 CN 连接信息和模型配置
 
 # 2. 构建镜像
-docker-compose build
+docker compose build
 
 # 3. 启动服务
-docker-compose up -d
+docker compose up -d
 
 # 4. 访问
 # 前端: http://localhost:8088

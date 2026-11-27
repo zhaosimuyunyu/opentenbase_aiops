@@ -240,19 +240,11 @@ OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。配�
 
 ### OpenTenBase 连接
 
-项目通过 **psycopg2** 连接 OpenTenBase：
+在 `.env` 中填写协调节点（CN）的 PostgreSQL 协议连接信息：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER` 和认证所需的 `DB_PASSWORD`。裸机、虚拟机和远程服务器都可以使用实际 DNS 名或 IP。同一台宿主机上的数据库可用 `host.docker.internal`，端口填宿主机可达的 SQL 端口。
 
-```python
-# 容器内直接连接
-conn = psycopg2.connect(
-    host="otb-node1",
-    port=11003,
-    user="opentenbase",
-    dbname="postgres"
-)
-```
+默认 Compose 自动创建 AIOps 应用网络。基础 SQL 连接要求 CN 的监听地址、防火墙和 `pg_hba.conf` 允许 AIOps 的实际连接来源。启动后用 `/health` 的 `components.opentenbase.connected` 检查 CN 连通性。
 
-默认 Compose 自动创建应用网络。远程裸机或虚拟机填写 CN 的 DNS 名或 IP，同一台宿主机上的数据库填写 `host.docker.internal`。填写实际 SQL 端口、数据库名和账号，确保数据库监听地址、防火墙和 `pg_hba.conf` 允许来自 AIOps 容器的连接。逐节点直连采集还要求容器能访问 `pgxc_node` 公布的地址。当前已实测 OpenTenBase v5.0，其他版本可运行下方兼容性探测。
+逐节点巡检还要求 AIOps 能访问 `pgxc_node` 公布的节点地址，系统视图、慢日志和修复功能各有版本及权限要求。当前实测 OpenTenBase v5.0，接入其他环境时可用下方脚本逐项验证。
 
 使用已有课程网络的同学可将 `DB_HOST` 和 `DB_PORT` 设置为实验 CN 的地址和端口，再运行：
 

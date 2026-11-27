@@ -53,10 +53,13 @@
 
 ## 4. 交付命令
 
+下载后先按 [连接说明](../README.md#opentenbase-连接) 配置实际 CN 的 PostgreSQL 协议地址、SQL 端口、数据库和账号。默认 Compose 自建应用网络，已有课程集群按连接说明使用 `compose.lab.yml`。用 `/health` 检查 CN 连通性，再用兼容性脚本验证节点直连、系统视图和权限。本文的实机结果来自 OpenTenBase v5.0 实验集群。
+
 ```powershell
 git clone https://github.com/zhaosimuyunyu/opentenbase_aiops.git
 cd opentenbase_aiops
 Copy-Item .env.example .env
+# 编辑 .env 后再启动
 docker compose up -d --build
 docker compose ps
 Invoke-RestMethod http://localhost:8000/health
