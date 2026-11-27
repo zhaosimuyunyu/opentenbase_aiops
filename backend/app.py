@@ -292,7 +292,16 @@ async def health_check():
         if metadata_store is not None:
             metadata_store.close()
 
-    readiness = build_readiness(database_status, metadata_status)
+    readiness = build_readiness(
+        database_status,
+        metadata_status,
+        capabilities={
+            "ai_analysis": {
+                "configured": bool(config.DEEPSEEK_API_KEY),
+                "model": config.DEEPSEEK_MODEL if config.DEEPSEEK_API_KEY else None,
+            },
+        },
+    )
     return JSONResponse(
         readiness,
         status_code=200 if readiness["status"] == "ready" else 503,

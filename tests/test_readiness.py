@@ -25,6 +25,17 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(result["api"], "degraded")
         self.assertEqual(result["components"]["metadata_database"]["error"], "OperationalError")
 
+    def test_missing_optional_ai_capability_does_not_hide_database_readiness(self):
+        result = build_readiness(
+            {"connected": True},
+            {"connected": True},
+            capabilities={"ai_analysis": {"configured": False, "model": None}},
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertFalse(result["capabilities"]["ai_analysis"]["configured"])
+        self.assertIsNone(result["capabilities"]["ai_analysis"]["model"])
+
 
 if __name__ == "__main__":
     unittest.main()

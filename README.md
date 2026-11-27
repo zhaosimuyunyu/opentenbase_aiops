@@ -98,7 +98,7 @@ docker compose exec -T aiops-api python -m scripts.benchmark_health_collection \
   --runs 10 --concurrency 3
 ```
 
-`/health` 同时检查 OpenTenBase 和 metadata PostgreSQL。周期巡检状态保存在 metadata PostgreSQL，API 重启后会恢复完成/失败状态和下一次重试时间。benchmark 只读目标数据库，不执行修复操作。
+`/health` 同时检查 OpenTenBase 和 metadata PostgreSQL，并在 `capabilities.ai_analysis.configured` 报告 AI 模型密钥是否已配置。AI 未配置时，数据库和 metadata 依赖仍可 ready，监控端可单独识别 AI 能力不可用。周期巡检状态保存在 metadata PostgreSQL，API 重启后会恢复完成/失败状态和下一次重试时间。benchmark 只读目标数据库，不执行修复操作。
 
 ## 📦 项目结构
 
