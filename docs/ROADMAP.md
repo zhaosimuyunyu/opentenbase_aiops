@@ -4,6 +4,16 @@
 
 **目标日期**: 2026-11-29
 
+## 2026-11-27 当前状态
+
+以下实测状态更新并补充前面的历史检查项：
+
+- `scripts/verify_analyze_repair.py` 已通过真实 `lab` 集群端到端验收。巡检、AI 分析、修复提案、具名人工审批、独立非超级用户执行 `ANALYZE` 和双 DN 后置验证均成功；脚本会清理隔离表、临时角色及关联元数据，clone 后可复跑。
+- 修复执行目前只验证逐 DN 表 owner 路径。OpenTenBase v5.0 上管理员 `SECURITY DEFINER` 函数调用出现 `permission denied to set session authorization opentenbase`，该路径仍未兼容。
+- GitHub Actions `Regression tests` 在提交 `39e45ef` 通过，132 tests、3 skipped。AI client 改为首次 AI 请求时创建，无 DeepSeek key 时 API 的非 AI 路由和状态测试仍可加载。
+- 当前集群周期巡检持续完成，最近 20 次分析耗时 P50 约 15 秒、P95 约 24 秒。实验环境样本不构成生产负载性能基线。
+- 项目仍未达到生产级。代表性并发/数据规模压力测试、生产身份认证与密钥管理、部署恢复演练、更多有边界的修复操作及 `SECURITY DEFINER` 兼容路径尚未完成。
+
 ## 2026-11-24 运行状态
 
 ## 2026-11-25 交付检查
