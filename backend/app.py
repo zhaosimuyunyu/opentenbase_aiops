@@ -94,7 +94,14 @@ app.add_middleware(
 db_connector = OpenTenBaseConnector(config)
 cluster_collector = ClusterCollector(db_connector)
 performance_collector = PerformanceCollector(db_connector, config)
-llm_client = DeepSeekClient(config)
+llm_client = None
+
+
+def get_llm_client():
+    global llm_client
+    if llm_client is None:
+        llm_client = DeepSeekClient(config)
+    return llm_client
 
 
 class QuestionRequest(BaseModel):
@@ -423,7 +430,7 @@ async def diagnose_issue(request: DiagnosisRequest):
         performance_data = performance_collector.collect().get('data', {})
 
         # Use AI to diagnose
-        diagnosis = llm_client.diagnose_issue(
+        diagnosis = get_llm_client().diagnose_issue(
             issue_description=request.description,
             cluster_data={**cluster_data, **performance_data}
         )
@@ -458,7 +465,7 @@ async def get_health_report():
         cluster_data = cluster_collector.collect().get('data', {})
         performance_data = performance_collector.collect().get('data', {})
 
-        report = llm_client.generate_health_summary(
+        report = get_llm_client().generate_health_summary(
             cluster_data=cluster_data,
             performance_data=performance_data
         )

@@ -10,6 +10,18 @@ class AutomationStatusTests(unittest.TestCase):
         from backend.app import get_automation_status
         return get_automation_status()
 
+    def test_llm_client_is_initialized_on_first_ai_use_and_then_reused(self):
+        from backend import app
+
+        client = object()
+        with patch.object(app, "llm_client", None), patch.object(
+            app, "DeepSeekClient", return_value=client
+        ) as client_factory:
+            self.assertIs(app.get_llm_client(), client)
+            self.assertIs(app.get_llm_client(), client)
+
+        client_factory.assert_called_once_with(app.config)
+
     def test_reports_enabled_auto_repair_configuration_without_audit_tables(self):
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value
