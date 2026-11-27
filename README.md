@@ -104,6 +104,20 @@ docker compose exec -T aiops-api python -m scripts.benchmark_health_collection \
 
 设置 `AIOPS_UI_PASSWORD` 后，Streamlit 页面会显示共享密码登录门禁，认证状态保存在服务端 Streamlit session。它不提供个人身份、角色或登录失败限流，生产环境应放在具备用户身份认证和 TLS 的反向代理之后。
 
+### Metadata 备份与恢复演练
+
+备份命令会从 pgvector metadata PostgreSQL 生成 custom-format dump 和 SHA-256 文件，归档默认写入已被 Git 忽略的 `backups/` 目录。验证命令会先校验 SHA-256，再恢复到唯一临时数据库，检查核心表并输出行数，最后删除临时数据库。实际恢复命令只接受新的数据库名，不会覆盖当前配置的 `aiops_knowledge`。
+
+```powershell
+python scripts/metadata_backup.py backup
+python scripts/metadata_backup.py verify backups/aiops-metadata-<timestamp>.dump
+python scripts/metadata_backup.py restore backups/aiops-metadata-<timestamp>.dump --database aiops_recovery
+```
+
+实际恢复会留下 `aiops_recovery` 数据库，应用不会自动切换到它。完成连接配置和抽样核对前，不要删除原数据库；备份文件包含审计、会话、知识库和记忆数据，应按敏感数据保管。
+
+此工具只备份 AIOps 使用的 metadata/knowledge PostgreSQL，不包含所连接的 OpenTenBase 业务集群，也不是连续 WAL/PITR 备份。当前执行方式为人工按需运行，生产环境仍需设置备份计划、异地副本和保留策略。
+
 ## 📦 项目结构
 
 ```

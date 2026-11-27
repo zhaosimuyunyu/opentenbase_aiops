@@ -22,9 +22,11 @@
 - 重建后的 API 容器健康，`/health` 确认 OpenTenBase v5.0 与 pgvector metadata PostgreSQL 均连接成功，AI 配置可用。
 - 增加可选共享 Bearer API key，保护 `/api/*`、`/metrics` 和根路径，`/health` 留给容器探针；Streamlit 只在服务端向 API 附加 key。临时 key 实测无认证返回 401、有效认证返回 200，配置状态由 `/health` 暴露。该门禁不是用户身份系统，也没有 RBAC、key 轮换管理或速率限制，生产身份治理仍未完成。
 - 增加可选 Streamlit 共享密码登录门禁，覆盖 Docker 默认 UI 和保留入口；认证状态限制在服务器端会话。它没有个人身份、RBAC 或登录限流，生产部署仍应使用受管身份提供方或认证反向代理。
+- 增加 metadata PostgreSQL custom-format 备份、SHA-256 校验、临时库完整恢复验证和恢复到新数据库名的命令；真实数据库演练已通过。定时备份、异地副本、WAL/PITR 与 OpenTenBase 业务库的备份恢复仍未覆盖，README 提供了可复跑命令。
+- 2026-11-27 已从运行中的 metadata PostgreSQL 创建本地备份 `backups/aiops-metadata-20261127T044052Z.dump`，SHA-256 `651d307f4de27a6ce5bd3302b8f4118f11b740957174d564bedcd7e99830b554`。恢复验证临时库与隔离新库均成功，恢复出 68 份知识文档、3502 个向量片段和 204 条审计；临时库已删除，当前 `aiops_knowledge` 未被覆盖。归档因含审计和会话数据被 Git 忽略，属于本机敏感数据备份，不会推到仓库。
 - 复跑真实 `lab` 场景的 `scripts/verify_analyze_repair.py` 成功：模型未回退，引用 6 条知识，具名人工审批后以临时非超级用户执行 `ANALYZE`，两个 DN 后置验证通过，临时对象和关联记录已清理。
 - SQL 脱敏迁移只覆盖审计、修复及 operational memory JSON 字段。交互式 Agent 会话文本、问答历史、其它任意文本列不在本次迁移范围内；SQL 执行审计只存 SQL SHA-256，不存 SQL 原文。若这些文本可能包含敏感值，仍需定义文本保留与脱敏策略。
-- 本次结果证明功能闭环在一套课程实验集群可运行，不证明生产身份认证、密钥管理、代表性负载性能、备份恢复、HA/多副本 API 或生产级变更回滚已经完成。
+- 本次结果证明功能闭环和 metadata PostgreSQL 的手工备份/恢复演练在一套课程实验环境可运行，不证明生产身份认证、密钥管理、代表性负载性能、异地/时间点恢复、OpenTenBase 业务库恢复、HA/多副本 API 或生产级变更回滚已经完成。
 
 ## 2026-11-24 运行状态
 

@@ -49,6 +49,7 @@ data/knowledge_base/*
 !data/.gitkeep
 logs/
 *.log
+backups/
 
 # Docker
 docker-compose.override.yml
