@@ -48,7 +48,7 @@
 ### 前置条件
 
 - Docker & Docker Compose
-- 已运行且能从 Docker 容器访问的 OpenTenBase 集群。默认 Compose 需要已存在的外部网络 `otb-lab-net`
+- 已运行的 OpenTenBase 集群，协调节点（CN）可部署在裸机、虚拟机、远程服务器或容器中
 - DeepSeek API Key
 
 ### 1. 环境配置
@@ -62,6 +62,8 @@ cd opentenbase_aiops
 Copy-Item .env.example .env
 # 编辑 .env，填写 OpenTenBase 连接信息和 DeepSeek API Key
 ```
+
+按 [OpenTenBase 连接](#opentenbase-连接) 填写实际 CN 地址和端口。已有课程实验集群可使用该节的 Compose 启动命令。
 
 ### 2. 容器化部署
 
@@ -164,8 +166,8 @@ opentenbase-aiops/
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `DB_HOST` | OpenTenBase 主机 | `otb-node1` |
-| `DB_PORT` | OpenTenBase 端口 | `11003` |
+| `DB_HOST` | OpenTenBase CN 的 DNS 名或 IP | `host.docker.internal`（Compose） |
+| `DB_PORT` | OpenTenBase CN 的 SQL 端口 | `5432`（Compose） |
 | `DB_USER` | 数据库用户 | `opentenbase` |
 | `DB_NAME` | 连接的数据库 | `postgres` |
 | `DB_PASSWORD` | 数据库密码 | 空 |
@@ -250,7 +252,13 @@ conn = psycopg2.connect(
 )
 ```
 
-默认 Compose 配置需要预先存在的外部网络 `otb-lab-net`。使用不同部署拓扑时，确保 API 容器能访问配置的 CN 和 `pgxc_node` 公布的节点地址。
+默认 Compose 自动创建应用网络。远程裸机或虚拟机填写 CN 的 DNS 名或 IP，同一台宿主机上的数据库填写 `host.docker.internal`。填写实际 SQL 端口、数据库名和账号，确保数据库监听地址、防火墙和 `pg_hba.conf` 允许来自 AIOps 容器的连接。逐节点直连采集还要求容器能访问 `pgxc_node` 公布的地址。当前已实测 OpenTenBase v5.0，其他版本可运行下方兼容性探测。
+
+使用已有课程网络的同学可将 `DB_HOST` 和 `DB_PORT` 设置为实验 CN 的地址和端口，再运行：
+
+```powershell
+docker compose -f docker-compose.yml -f compose.lab.yml up -d --build
+```
 
 使用当前仓库构建并启动 API 后，从项目目录运行只读兼容性探测。第二条命令适用于需要验收单表统计的环境，请将表名替换成实际存在的表。
 
@@ -380,24 +388,6 @@ python scripts/test_connection.py
 
 MIT License
 
-## 👥 作者
-
-OpenTenBase AIOps 开发团队
-
-## 🙏 致谢
-
-- [OpenTenBase](https://github.com/OpenTenBase/OpenTenBase) - 企业级分布式 HTAP 数据库
-- [DeepSeek](https://www.deepseek.com/) - AI 大模型支持
-- [Streamlit](https://streamlit.io/) - 快速构建数据应用
-
-## 📮 联系方式
-
-- 提交 Issue: [GitHub Issues](https://github.com/OpenTenBase/AIOPS/issues)
-- 邮箱: devingeng@tencent.com
-
----
-
-⭐ 如果这个项目对您有帮助，请给我们一个 Star！
-### Audit analysis retry
+## 巡检重新分析
 
 `POST /api/audits/{audit_id}/reanalyze` reruns the model analysis from persisted read-only evidence. It does not recollect the database or execute SQL, and the stored finding severity remains the minimum risk level.

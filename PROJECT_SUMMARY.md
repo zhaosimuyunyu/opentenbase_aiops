@@ -305,31 +305,7 @@ docker compose exec -T aiops-api python scripts/verify_otb_compatibility.py
 
 ### Docker Compose 一键部署
 
-```yaml
-version: '3.8'
-services:
-  aiops-api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DB_HOST=otb-node1
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-    networks:
-      - otb-lab-net
-
-  aiops-frontend:
-    build: .
-    command: streamlit run frontend/app_redesigned.py
-    ports:
-      - "8088:8088"
-    depends_on:
-      - aiops-api
-
-networks:
-  otb-lab-net:
-    external: true
-```
+Compose 自动创建应用网络。OpenTenBase 可以部署在裸机、虚拟机、远程服务器或容器中，连接配置见 [README](README.md#opentenbase-连接)。
 
 ### 启动命令
 
@@ -480,14 +456,3 @@ docker-compose up -d
    - Grafana Dashboard
    - 钉钉/企业微信告警
    - CI/CD 流水线集成
-
-## 📞 联系方式
-
-**开发者**: OpenTenBase AIOps 团队  
-**项目地址**: `/e/opentenbase/kaiyuan_contribute/opentenbase-aiops`  
-**提交日期**: 2024-11-26  
-**课程**: OpenTenBase 开源贡献 - AIOps 平台方向
-
----
-
-**感谢 OpenTenBase 社区和课程团队！**

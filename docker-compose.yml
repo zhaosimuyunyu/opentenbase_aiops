@@ -2,8 +2,6 @@ services:
   knowledge-db:
     image: pgvector/pgvector:pg16
     container_name: opentenbase-aiops-knowledge-db
-    networks:
-      - otb-lab-net
     environment:
       POSTGRES_DB: aiops_knowledge
       POSTGRES_USER: aiops_knowledge
@@ -20,8 +18,6 @@ services:
   metadata-backup:
     image: pgvector/pgvector:pg16
     profiles: ["backup"]
-    networks:
-      - otb-lab-net
     depends_on:
       knowledge-db:
         condition: service_healthy
@@ -47,13 +43,13 @@ services:
   aiops-service:
     build: .
     container_name: opentenbase-aiops
-    networks:
-      - otb-lab-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8088:8080"
     environment:
-      - DB_HOST=${DB_HOST:-otb-node1}
-      - DB_PORT=${DB_PORT:-11003}
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-5432}
       - DB_USER=${DB_USER:-opentenbase}
       - DB_NAME=${DB_NAME:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-}
@@ -98,8 +94,8 @@ services:
   aiops-api:
     build: .
     container_name: opentenbase-aiops-api
-    networks:
-      - otb-lab-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       knowledge-db:
         condition: service_healthy
@@ -133,8 +129,8 @@ services:
       - AIOPS_API_KEY=${AIOPS_API_KEY:-}
       - AIOPS_CORS_ORIGINS=${AIOPS_CORS_ORIGINS:-*}
       - AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS=${AIOPS_SQL_AUDIT_SEQ_SCAN_ROWS:-10000}
-      - DB_HOST=${DB_HOST:-otb-node1}
-      - DB_PORT=${DB_PORT:-11003}
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-5432}
       - DB_USER=${DB_USER:-opentenbase}
       - DB_NAME=${DB_NAME:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-}
@@ -163,10 +159,6 @@ services:
     healthcheck:
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8000/health']
     restart: unless-stopped
-
-networks:
-  otb-lab-net:
-    external: true
 
 volumes:
   aiops-data:

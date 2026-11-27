@@ -1,0 +1,9 @@
+services:
+  aiops-service:
+    networks: [default, otb-lab-net]
+  aiops-api:
+    networks: [default, otb-lab-net]
+
+networks:
+  otb-lab-net:
+    external: true

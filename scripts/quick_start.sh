@@ -19,7 +19,7 @@ if [ ! -f .env ]; then
         echo ""
         echo "Required configuration:"
         echo "  - DEEPSEEK_API_KEY=your_api_key_here"
-        echo "  - DB_HOST=otb-node1 (or your OpenTenBase CN host)"
+        echo "  - DB_HOST and DB_PORT for your OpenTenBase coordinator"
         echo ""
         exit 1
     else
@@ -46,17 +46,6 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 echo "🐳 Docker is running"
-echo ""
-
-# Check if OpenTenBase network exists
-if ! docker network inspect otb-lab-net > /dev/null 2>&1; then
-    echo "⚠️  Network 'otb-lab-net' not found"
-    echo "Creating network..."
-    docker network create otb-lab-net
-    echo "✅ Network created"
-else
-    echo "✅ Network 'otb-lab-net' exists"
-fi
 echo ""
 
 # Ask user which mode to run
@@ -118,11 +107,11 @@ case $choice in
 
         # Build images
         echo "Building Docker images..."
-        docker-compose build
+        docker compose build
 
         # Start services
         echo "Starting services..."
-        docker-compose up -d
+        docker compose up -d
 
         echo ""
         echo "✅ Services started!"
@@ -131,8 +120,8 @@ case $choice in
         echo "   Frontend: http://localhost:8088"
         echo "   API Docs: http://localhost:8000/docs"
         echo ""
-        echo "📊 Check logs: docker-compose logs -f"
-        echo "🛑 Stop services: docker-compose down"
+        echo "📊 Check logs: docker compose logs -f"
+        echo "🛑 Stop services: docker compose down"
         ;;
 
     *)
