@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.engines.readonly_audit_engine import ReadonlyAuditEngine
 from backend.collectors.readonly_health import stale_statistics_nodes
+from backend.utils.sql_redaction import redact_sql_literals
 
 
 class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
@@ -73,12 +74,26 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
             f"{module}.ReadonlyHealthCollector"
         ) as collector, patch.object(
             engine, "_diagnose", new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []})
-        ):
+        ) as diagnose:
             collector.return_value.collect.return_value = snapshot
             result = await engine.run_health_audit()
+        sanitized_query, fingerprint = redact_sql_literals("UPDATE public.items SET value=1")
+        expected_blocker = {
+            **snapshot["checks"]["data_node_lock_blockers"][0],
+            "query": sanitized_query,
+            "query_fingerprint": fingerprint,
+            "query_redacted": True,
+        }
         self.assertEqual(
             result["evidence"]["performance"]["data_node_lock_blockers"],
-            snapshot["checks"]["data_node_lock_blockers"],
+            [expected_blocker],
+        )
+        self.assertEqual(
+            diagnose.await_args.args[1]["performance"]["data_node_lock_blockers"],
+            [expected_blocker],
+        )
+        self.assertIn(
+            "value=1", snapshot["checks"]["data_node_lock_blockers"][0]["query"]
         )
 
     async def test_slow_query_log_records_create_a_finding_and_are_persisted(self):
@@ -106,9 +121,16 @@ class HealthAuditScopeTests(unittest.IsolatedAsyncioTestCase):
             collector.return_value.collect.return_value = snapshot
             result = await ReadonlyAuditEngine().run_health_audit()
 
+        redacted_query, fingerprint = redact_sql_literals("SELECT pg_sleep(12)")
+        expected_query = {
+            **slow_queries[0],
+            "query": redacted_query,
+            "query_fingerprint": fingerprint,
+            "query_redacted": True,
+        }
         finding = next(item for item in result["findings"] if item["check"] == "long_running_queries")
-        self.assertEqual(finding["evidence"], slow_queries)
-        self.assertEqual(result["evidence"]["performance"]["slow_query_logs"], slow_queries)
+        self.assertEqual(finding["evidence"], [expected_query])
+        self.assertEqual(result["evidence"]["performance"]["slow_query_logs"], [expected_query])
 
     async def test_prepared_transaction_reports_missing_official_record_diagnostic(self):
         module = "backend.engines.readonly_audit_engine"

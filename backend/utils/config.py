@@ -96,6 +96,10 @@ class Config:
     AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS = max(
         60, int(os.getenv("AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS", "900"))
     )
+    AIOPS_SLOW_QUERY_REDACT_LITERALS: bool = (
+        os.getenv("AIOPS_SLOW_QUERY_REDACT_LITERALS", "true").lower()
+        in {"1", "true", "yes", "on"}
+    )
     AIOPS_DISTRIBUTED_ENABLED: bool = (
         os.getenv("AIOPS_DISTRIBUTED_ENABLED", "true").lower()
         in {"1", "true", "yes", "on"}

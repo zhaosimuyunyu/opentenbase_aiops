@@ -6,6 +6,7 @@ import re
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from ..utils.sql_redaction import query_fingerprint, redact_sql_literals
 
 
 LOG_FILE_QUERY = """
@@ -61,7 +62,7 @@ def _parse_log_time(value, timezone):
 
 def parse_slow_query_csv(
     contents, *, node_name, reference_time, lookback_seconds,
-    source_file=None, partial_file=False,
+    source_file=None, partial_file=False, redact_literals=True,
 ):
     if partial_file:
         first_record = LOG_RECORD_START.search(contents)
@@ -77,9 +78,13 @@ def parse_slow_query_csv(
         logged_at = _parse_log_time(record[0], reference_time.tzinfo)
         if logged_at is None or logged_at < cutoff:
             continue
-        query = match.group(2).strip()
-        if not query:
+        raw_query = match.group(2).strip()
+        if not raw_query:
             continue
+        query = raw_query
+        fingerprint = query_fingerprint(raw_query)
+        if redact_literals:
+            query, fingerprint = redact_sql_literals(raw_query)
         slow_queries.append({
             "node_name": node_name,
             "pid": int(record[4]) if record[4].isdigit() else None,
@@ -90,6 +95,8 @@ def parse_slow_query_csv(
             "duration_ms": float(match.group(1)),
             "logged_at": logged_at,
             "query": query,
+            "query_fingerprint": fingerprint,
+            "query_redacted": redact_literals,
             "source": "server_csv_log",
             "source_file": source_file,
         })
@@ -140,6 +147,9 @@ class SlowQueryLogCollector:
                             lookback_seconds=lookback_seconds,
                             source_file=log_file["file"],
                             partial_file=log_file["partial_file"],
+                            redact_literals=getattr(
+                                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                            ),
                         ))
                     slow_queries.extend(
                         query for query in node_queries
@@ -162,7 +172,7 @@ class SlowQueryLogCollector:
         for query in slow_queries:
             key = (
                 query["node_name"], query["pid"], query["logged_at"],
-                query["query"],
+                query.get("query_fingerprint", query["query"]),
             )
             existing = unique.get(key)
             if existing is None or (

@@ -9,6 +9,7 @@ from ..tools.lock_audit_tool import execute_get_database_locks
 from ..ai.agent_client import AIOpsAgent
 from ..utils.operations_store import OperationsStore
 from ..utils.config import Config
+from ..utils.sql_redaction import redact_query_data
 from ..collectors.readonly_health import ReadonlyHealthCollector, stale_statistics_nodes
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,12 @@ class ReadonlyAuditEngine:
         """Run read-only checks across cluster, capacity, locks, and query health."""
         if progress:
             progress("collecting")
-        snapshot = ReadonlyHealthCollector(self.config).collect(table=table)
+        snapshot = redact_query_data(
+            ReadonlyHealthCollector(self.config).collect(table=table),
+            redact_literals=getattr(
+                self.config, 'AIOPS_SLOW_QUERY_REDACT_LITERALS', True
+            ),
+        )
         checks = snapshot['checks']
         cluster = {name: checks.get(name) for name in
                    ('nodes', 'connections', 'replication', 'database_info', 'database_identity',

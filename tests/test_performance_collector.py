@@ -46,12 +46,19 @@ class PerformanceCollectorTests(unittest.TestCase):
 
     def test_long_query_threshold_is_parameterized_and_clamped(self):
         collector, connector, cursor = self.make_collector()
+        cursor.fetchall.return_value = [{
+            "pid": 42, "query": "SELECT * FROM users WHERE id=9917",
+        }]
 
         result = collector.collect_long_queries(threshold_seconds=0)
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(cursor.execute.call_args_list[1].args[1], (1,))
         self.assertIn("pg_stat_activity", cursor.execute.call_args_list[1].args[0])
+        query = result["data"]["queries"][0]
+        self.assertEqual(query["query"], "SELECT * FROM users WHERE id=?")
+        self.assertNotIn("9917", query["query"])
+        self.assertEqual(len(query["query_fingerprint"]), 64)
 
     def test_table_statistics_limit_is_bounded(self):
         collector, connector, cursor = self.make_collector()

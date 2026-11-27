@@ -1,9 +1,10 @@
 import csv
+import hashlib
 import io
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from backend.collectors.slow_query_logs import parse_slow_query_csv
+from backend.collectors.slow_query_logs import parse_slow_query_csv, redact_sql_literals
 
 
 class SlowQueryLogTests(unittest.TestCase):
@@ -44,8 +45,66 @@ class SlowQueryLogTests(unittest.TestCase):
         self.assertEqual(rows[0]["pid"], 6073)
         self.assertEqual(rows[0]["application_name"], "course-demo")
         self.assertEqual(rows[0]["duration_ms"], 12015.69)
-        self.assertEqual(rows[0]["query"], "SELECT pg_sleep(12)")
+        self.assertEqual(rows[0]["query"], "SELECT pg_sleep(?)")
+        self.assertTrue(rows[0]["query_redacted"])
+        self.assertEqual(len(rows[0]["query_fingerprint"]), 64)
         self.assertEqual(rows[0]["source"], "server_csv_log")
+
+    def test_redacts_literals_and_comments_but_preserves_identifiers(self):
+        query = (
+            'SELECT "customer_id" FROM users '
+            "WHERE email='alice@example.com' AND tenant_id=92831 "
+            "AND note=$tag$private text$tag$ /* account 8821 */"
+        )
+
+        redacted, fingerprint = redact_sql_literals(query)
+
+        self.assertIn('"customer_id"', redacted)
+        self.assertIn("email='?'", redacted)
+        self.assertIn("tenant_id=?", redacted)
+        self.assertIn("note=?", redacted)
+        self.assertNotIn("alice@example.com", redacted)
+        self.assertNotIn("92831", redacted)
+        self.assertNotIn("private text", redacted)
+        self.assertNotIn("8821", redacted)
+        self.assertEqual(fingerprint, hashlib.sha256(redacted.encode()).hexdigest())
+
+    def test_redacted_fingerprint_groups_literal_variants_without_retaining_values(self):
+        first, first_fingerprint = redact_sql_literals(
+            "SELECT * FROM orders WHERE customer_id=1001"
+        )
+        second, second_fingerprint = redact_sql_literals(
+            "SELECT * FROM orders WHERE customer_id=9007"
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first_fingerprint, second_fingerprint)
+        self.assertNotIn("1001", first)
+        self.assertNotIn("9007", second)
+
+    def test_literal_redaction_can_be_disabled_for_isolated_diagnostics(self):
+        contents = self.make_record(
+            logged_at="2026-11-26 14:35:00.250 CST",
+            message="duration: 12015.690 ms  statement: SELECT * FROM users WHERE id=92831",
+        )
+        reference_time = datetime(
+            2026, 11, 26, 14, 40, tzinfo=timezone(timedelta(hours=8))
+        )
+
+        rows = parse_slow_query_csv(
+            contents,
+            node_name="cn0001",
+            reference_time=reference_time,
+            lookback_seconds=600,
+            redact_literals=False,
+        )
+
+        self.assertEqual(rows[0]["query"], "SELECT * FROM users WHERE id=92831")
+        self.assertFalse(rows[0]["query_redacted"])
+        self.assertEqual(
+            rows[0]["query_fingerprint"],
+            hashlib.sha256(rows[0]["query"].encode()).hexdigest(),
+        )
 
     def test_ignores_old_non_duration_and_empty_records(self):
         reference_time = datetime(
@@ -94,7 +153,7 @@ class SlowQueryLogTests(unittest.TestCase):
         )
 
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["query"], "SELECT pg_sleep(12)")
+        self.assertEqual(rows[0]["query"], "SELECT pg_sleep(?)")
 
     def test_collector_excludes_old_records_and_reports_node_read_errors(self):
         from types import SimpleNamespace

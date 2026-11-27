@@ -27,6 +27,7 @@ from .utils.operational_memory import OperationalMemory
 from .utils.audit_status import normalize_audit_record
 from .utils.readiness import build_readiness
 from .utils.latency_metrics import scheduled_analysis_latency_metrics
+from .utils.sql_redaction import redact_query_data
 from psycopg2.extras import Json, RealDictCursor
 from .engines.repair_workflow import RepairWorkflow, has_repair_identity
 from .engines.health_audit_scheduler import HealthAuditScheduler
@@ -909,7 +910,12 @@ def get_audit(audit_id: str):
             record = cursor.fetchone()
         if record is None:
             raise HTTPException(status_code=404, detail="Audit not found")
-        return normalize_audit_record(record)
+        result = normalize_audit_record(record)
+        result["evidence"] = redact_query_data(
+            result.get("evidence") or {},
+            redact_literals=config.AIOPS_SLOW_QUERY_REDACT_LITERALS,
+        )
+        return result
     except HTTPException:
         raise
     except Exception as error:
@@ -951,7 +957,10 @@ def create_repair_from_audit(audit_id: str, request: RepairProposalRequest):
             record = cursor.fetchone()
         if not record:
             raise HTTPException(status_code=404, detail="Audit not found")
-        audit_evidence = record["evidence"] or {}
+        audit_evidence = redact_query_data(
+            record["evidence"] or {},
+            redact_literals=config.AIOPS_SLOW_QUERY_REDACT_LITERALS,
+        )
         findings = audit_evidence.get("findings", [])
         finding = findings[request.finding_index] if request.finding_index < len(findings) else {}
         evidence = finding.get("evidence") or {}

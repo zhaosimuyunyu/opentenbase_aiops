@@ -4,6 +4,7 @@ from psycopg2 import sql
 from .base import BaseCollector
 from ..utils.logger import setup_logger
 from ..utils.config import Config
+from ..utils.sql_redaction import redact_query_record
 
 logger = setup_logger(__name__)
 
@@ -26,7 +27,16 @@ class PerformanceCollector(BaseCollector):
                 ),
             )
             cursor.execute(statement, params)
-            return cursor.fetchall()
+            rows = cursor.fetchall()
+            return [
+                redact_query_record(
+                    row,
+                    redact_literals=getattr(
+                        self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                    ),
+                )
+                for row in rows
+            ]
 
     def _query_data_nodes(self, statement, check_name):
         nodes = self.db.execute_query(
@@ -58,7 +68,12 @@ class PerformanceCollector(BaseCollector):
                         (statement,),
                     )
                     rows.extend(
-                        {"node_name": node_name, **dict(row)}
+                        redact_query_record(
+                            {"node_name": node_name, **dict(row)},
+                            redact_literals=getattr(
+                                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                            ),
+                        )
                         for row in cursor.fetchall()
                     )
             except Exception as error:

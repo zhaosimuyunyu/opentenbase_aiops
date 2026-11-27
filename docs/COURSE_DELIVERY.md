@@ -59,7 +59,7 @@ Stop-Transcript
 - 既有 prepared transaction 锁会使部分目录/统计检查超时，巡检报告会标记 `partial` 并保留错误证据。
 - 本实例上正在运行的查询在 CN 和 DN 的 `pg_stat_activity` 都显示 `state=idle`、`query_start=null`、`query=""`。慢查询因此通过数据库 CSV 日志里的 `duration: ... statement: ...` 记录在语句结束后识别，不是运行中实时识别。
 - 当前实例 `log_min_duration_statement=10000`。采集器逐个连接注册的 CN/DN，通过 `pg_ls_dir`、`pg_stat_file` 和 `pg_read_file` 只读最近两个 CSV 文件的尾部，每个文件最多 8 MiB，并只报告 `AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS` 时间窗口内的新记录，默认 900 秒，与默认巡检间隔相同。
-- 日志访问使用当前数据库账号。CSV 日志包含 SQL 文本，巡检会把匹配语句持久化到审计证据；当前课程环境的账号是超级用户。生产环境需单独评估日志读取授权、SQL 中的敏感常量和日志采集对节点的开销。
+- 日志访问使用当前数据库账号。CSV 日志包含 SQL 文本，巡检默认移除注释并将字符串/数字 literal 脱敏后才交给模型或持久化，同时记录脱敏语句形状指纹。`AIOPS_SLOW_QUERY_REDACT_LITERALS=false` 会关闭该保护，只应在隔离调试环境使用。当前课程环境的日志读取账号是超级用户；生产环境仍需评估日志读取授权和采集对节点的开销。
 
 ## 剩余课程工作
 

@@ -16,6 +16,7 @@ from ..security.permissions import OperationRegistry
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
 from ..utils.operations_store import OperationsStore
+from ..utils.sql_redaction import query_fingerprint, redact_query_data, redact_sql_literals
 
 
 ALLOWED_OPERATIONS = {"analyze_table", "cancel_query"}
@@ -375,29 +376,54 @@ class RepairWorkflow:
         ]
         expected_keys = (
             "node_name", "pid", "database", "usename", "application_name",
-            "query_start", "xact_start", "query",
+            "query_start", "xact_start",
         )
-        expected = next((
-            {
+        expected = None
+        legacy_expected = None
+        for blocker in candidates:
+            raw_query = blocker.get("query") or ""
+            if blocker.get("query_redacted") is True:
+                redacted_query = raw_query
+                fingerprint = blocker.get("query_fingerprint") or query_fingerprint(raw_query)
+            else:
+                redacted_query, fingerprint = redact_sql_literals(raw_query)
+            matches_identity = all(
+                blocker.get(key) == parameters.get("user" if key == "usename" else key)
+                for key in expected_keys
+            )
+            provided_query = parameters.get("query")
+            provided_fingerprint = parameters.get("query_fingerprint")
+            matches_query = isinstance(provided_query, str) and provided_query in {
+                raw_query, redacted_query,
+            }
+            matches_fingerprint = (
+                provided_fingerprint is None
+                or provided_fingerprint == fingerprint
+            )
+            if not (matches_identity and matches_query and matches_fingerprint):
+                continue
+            expected = {
                 **{key: blocker.get(key) for key in expected_keys if key != "usename"},
                 "user": blocker.get("usename"),
                 "database_identity": database_identity,
+                "query": redacted_query,
+                "query_fingerprint": fingerprint,
             }
-            for blocker in candidates
-            if all(blocker.get(key) == parameters.get(
-                "user" if key == "usename" else key
-            ) for key in expected_keys)
-        ), None)
+            legacy_expected = {**expected, "query": raw_query}
+            legacy_expected.pop("query_fingerprint")
+            break
         if (finding.get("check") != "data_node_lock_waits" or expected is None
                 or not database_identity.get("system_identifier")
                 or not database_identity.get("database")):
             raise ValueError("Query cancellation requires complete blocker identity from a lock finding")
         if not isinstance(expected["pid"], int) or expected["pid"] <= 0:
             raise ValueError("Query cancellation target must exactly match the audited blocker identity")
-        if parameters != expected:
+        if parameters != expected and parameters != legacy_expected:
             raise ValueError("Query cancellation target must exactly match the audited blocker identity")
         if not expected["query"] or not expected["query"].strip():
             raise ValueError("Query cancellation is unavailable for an empty or internal query")
+        if not re.fullmatch(r"[a-f0-9]{64}", expected["query_fingerprint"]):
+            raise ValueError("Query cancellation requires a complete statement fingerprint")
         return expected
 
     @staticmethod
@@ -448,11 +474,14 @@ class RepairWorkflow:
                 observed = {
                     "pid": session[0], "user": session[1], "database": session[2],
                     "application_name": session[3], "query_start": session[4],
-                    "xact_start": session[5], "query": session[6],
+                    "xact_start": session[5],
                 }
-                for key in ("pid", "user", "database", "application_name", "query"):
+                for key in ("pid", "user", "database", "application_name"):
                     if observed[key] != target[key]:
                         raise ValueError("Blocker identity changed since approval")
+                _, observed_fingerprint = redact_sql_literals(session[6] or "")
+                if observed_fingerprint != target["query_fingerprint"]:
+                    raise ValueError("Blocker statement changed since approval")
                 for key in ("query_start", "xact_start"):
                     if not self._same_session_value(observed[key], target[key]):
                         raise ValueError("Blocker transaction identity changed since approval")
@@ -573,6 +602,18 @@ class RepairWorkflow:
             params = self._lock_target(params, finding)
         else:
             raise ValueError("Operation is not enabled for execution")
+        finding = redact_query_data(
+            finding,
+            redact_literals=getattr(
+                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+            ),
+        )
+        evidence = redact_query_data(
+            evidence or {},
+            redact_literals=getattr(
+                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+            ),
+        )
         if operation == "analyze_table":
             lookup = """
                 SELECT request_id,status,parameters,finding,evidence
@@ -1185,7 +1226,23 @@ class RepairWorkflow:
                     (queue, queue, queue, max(1, min(limit, 100)), max(0, offset)),
                 )
                 columns = [item[0] for item in cur.description]
-                return [dict(zip(columns, row)) for row in cur.fetchall()]
+                records = [dict(zip(columns, row)) for row in cur.fetchall()]
+                return [
+                    {
+                        **record,
+                        **{
+                            key: redact_query_data(
+                                record[key],
+                                redact_literals=getattr(
+                                    self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                                ),
+                            )
+                            for key in ("parameters", "evidence", "result", "finding")
+                            if record.get(key) is not None
+                        },
+                    }
+                    for record in records
+                ]
         finally:
             kb.close()
 
@@ -1201,6 +1258,18 @@ class RepairWorkflow:
                     (request_id, max(1, min(limit, 500))),
                 )
                 columns = [item[0] for item in cur.description]
-                return [dict(zip(columns, row)) for row in cur.fetchall()]
+                records = [dict(zip(columns, row)) for row in cur.fetchall()]
+                return [
+                    {
+                        **record,
+                        "event_data": redact_query_data(
+                            record.get("event_data"),
+                            redact_literals=getattr(
+                                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                            ),
+                        ),
+                    }
+                    for record in records
+                ]
         finally:
             kb.close()

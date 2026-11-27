@@ -1,6 +1,8 @@
 import json
 
 from ..utils.operations_store import OperationsStore
+from ..utils.config import Config
+from ..utils.sql_redaction import redact_query_data
 from .readonly_audit_engine import ReadonlyAuditEngine
 
 
@@ -22,7 +24,10 @@ async def reanalyze_persisted_audit(audit_id, store_factory=OperationsStore, eng
         if record is None:
             raise LookupError("Audit not found")
         evidence = record["evidence"] if isinstance(record, dict) else record[0]
-        evidence = evidence or {}
+        evidence = redact_query_data(
+            evidence or {},
+            redact_literals=Config.AIOPS_SLOW_QUERY_REDACT_LITERALS,
+        )
         issue = (
             "重新分析已持久化的 OpenTenBase 只读健康审计证据。"
             "只能基于证据给出根因和只读建议，不得执行写操作。"

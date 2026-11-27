@@ -1,5 +1,6 @@
 LOCK_TOOL_SCHEMA = {'type': 'function', 'function': {'name': 'get_database_locks', 'description': 'Get current lock status from OpenTenBase cluster', 'parameters': {'type': 'object', 'properties': {'include_granted': {'type': 'boolean', 'default': True}}}}}
 from ..utils.db_connector import OpenTenBaseConnector
+from ..utils.sql_redaction import redact_query_record
 
 async def execute_get_database_locks(include_granted: bool = True):
     db = OpenTenBaseConnector()
@@ -24,7 +25,15 @@ async def execute_get_database_locks(include_granted: bool = True):
             cursor.execute("SET LOCAL statement_timeout = '2500ms'")
             cursor.execute("SET LOCAL lock_timeout = '750ms'")
             cursor.execute(sql)
-            rows = cursor.fetchall()
+            rows = [
+                redact_query_record(
+                    row,
+                    redact_literals=getattr(
+                        db.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                    ),
+                )
+                for row in cursor.fetchall()
+            ]
         if not include_granted:
             rows = [row for row in rows if not row['granted']]
         return {

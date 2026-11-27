@@ -8,6 +8,7 @@ from psycopg2.extras import RealDictCursor
 
 from ..utils.config import Config
 from ..utils.db_connector import OpenTenBaseConnector
+from ..utils.sql_redaction import redact_query_record
 from .slow_query_logs import SlowQueryLogCollector
 
 
@@ -221,7 +222,20 @@ class ReadonlyHealthCollector:
                     with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                         self._set_query_timeouts(cursor)
                         cursor.execute(sql)
-                        results[name] = [dict(row) for row in cursor.fetchall()]
+                        rows = [dict(row) for row in cursor.fetchall()]
+                        if name in {"locks", "long_running_queries", "idle_transactions"}:
+                            rows = [
+                                redact_query_record(
+                                    row,
+                                    redact_literals=getattr(
+                                        self.config,
+                                        "AIOPS_SLOW_QUERY_REDACT_LITERALS",
+                                        True,
+                                    ),
+                                )
+                                for row in rows
+                            ]
+                        results[name] = rows
                     connection.rollback()
                 except Exception as error:
                     connection.rollback()
@@ -499,7 +513,13 @@ class ReadonlyHealthCollector:
                         (CHECKS["data_node_lock_blockers"],),
                     )
                     blockers.extend(
-                        {"node_name": name, **dict(row)} for row in cursor.fetchall()
+                        redact_query_record(
+                            {"node_name": name, **dict(row)},
+                            redact_literals=getattr(
+                                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                            ),
+                        )
+                        for row in cursor.fetchall()
                     )
                 connection.rollback()
             except Exception as error:
@@ -521,7 +541,15 @@ class ReadonlyHealthCollector:
                         sql.SQL("EXECUTE DIRECT ON ({}) %s").format(sql.Identifier(name)),
                         (CHECKS["long_running_queries"],),
                     )
-                    queries.extend({"node_name": name, **dict(row)} for row in cursor.fetchall())
+                    queries.extend(
+                        redact_query_record(
+                            {"node_name": name, **dict(row)},
+                            redact_literals=getattr(
+                                self.config, "AIOPS_SLOW_QUERY_REDACT_LITERALS", True
+                            ),
+                        )
+                        for row in cursor.fetchall()
+                    )
                 connection.rollback()
             except Exception as error:
                 connection.rollback()

@@ -22,6 +22,35 @@ class AutomationStatusTests(unittest.TestCase):
 
         client_factory.assert_called_once_with(app.config)
 
+    def test_audit_detail_redacts_legacy_query_literals_before_return(self):
+        from backend.app import get_audit
+
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [
+            {"audit_table": "audit_records"},
+            {
+                "audit_id": "audit-legacy", "audit_type": "readonly_health_audit",
+                "created_at": None, "risk_level": "medium", "status": "completed",
+                "evidence": {
+                    "performance": {
+                        "slow_query_logs": [{
+                            "query": "SELECT * FROM users WHERE email='private@example.com'",
+                        }],
+                    },
+                },
+                "ai_analysis": {}, "knowledge_refs": [],
+            },
+        ]
+        with patch("backend.app.OperationsStore", return_value=store):
+            result = get_audit("audit-legacy")
+
+        query = result["evidence"]["performance"]["slow_query_logs"][0]
+        self.assertEqual(query["query"], "SELECT * FROM users WHERE email='?'")
+        self.assertNotIn("private@example.com", str(result))
+        self.assertTrue(query["query_redacted"])
+        store.close.assert_called_once()
+
     def test_reports_enabled_auto_repair_configuration_without_audit_tables(self):
         store = MagicMock()
         cursor = store.conn.cursor.return_value.__enter__.return_value

@@ -40,6 +40,29 @@ class AuditReanalysisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update.args[1][2:], ("critical", "audit-1"))
         store.close.assert_called_once()
 
+    async def test_reanalysis_redacts_literals_from_legacy_persisted_evidence(self):
+        store = MagicMock()
+        raw_query = "SELECT * FROM users WHERE email='private@example.com'"
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = {
+            "evidence": {
+                "findings": [],
+                "performance": {"long_running_queries": [{"query": raw_query}]},
+            }
+        }
+        with patch(
+            "backend.engines.audit_reanalysis.ReadonlyAuditEngine._diagnose",
+            new=AsyncMock(return_value={"structured": {}, "knowledge_refs": []}),
+        ) as diagnose:
+            await reanalyze_persisted_audit("audit-legacy", store_factory=lambda: store)
+
+        sent_evidence = diagnose.await_args.args[1]
+        row = sent_evidence["performance"]["long_running_queries"][0]
+        self.assertEqual(row["query"], "SELECT * FROM users WHERE email='?'")
+        self.assertNotIn("private@example.com", str(sent_evidence))
+        self.assertEqual(len(row["query_fingerprint"]), 64)
+        store.close.assert_called_once()
+
     async def test_missing_audit_returns_not_found(self):
         store = MagicMock()
         store.conn.cursor.return_value.__enter__.return_value.fetchone.return_value = None

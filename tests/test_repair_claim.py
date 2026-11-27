@@ -15,13 +15,51 @@ class RepairClaimTests(unittest.TestCase):
         cursor.description = [(name,) for name in (
             "event_id", "request_id", "event_type", "actor", "status", "event_data", "created_at"
         )]
-        cursor.fetchall.return_value = [(1, "request-1", "proposal_created", None, "pending", {}, None)]
+        cursor.fetchall.return_value = [(
+            1, "request-1", "proposal_created", None, "pending",
+            {"finding": {"query": "SELECT * FROM users WHERE email='private@example.com'"}}, None,
+        )]
         with patch.object(workflow, "_ensure_schema"), patch(
             "backend.engines.repair_workflow.OperationsStore", return_value=store
         ):
             events = workflow.list_events("request-1", limit=9999)
         self.assertEqual(events[0]["event_type"], "proposal_created")
+        self.assertEqual(
+            events[0]["event_data"]["finding"]["query"],
+            "SELECT * FROM users WHERE email='?'",
+        )
+        self.assertNotIn("private@example.com", str(events))
         self.assertEqual(cursor.execute.call_args.args[1], ("request-1", 500))
+        store.close.assert_called_once()
+
+    def test_repair_request_reader_redacts_legacy_query_literals(self):
+        workflow = RepairWorkflow()
+        workflow.config = MagicMock(AIOPS_SLOW_QUERY_REDACT_LITERALS=True)
+        store = MagicMock()
+        cursor = store.conn.cursor.return_value.__enter__.return_value
+        cursor.description = [(name,) for name in (
+            "request_id", "operation", "parameters", "evidence", "reason", "status",
+            "created_at", "approved_at", "approved_by", "result", "audit_id", "finding",
+            "manual_review",
+        )]
+        raw_query = "SELECT * FROM users WHERE email='private@example.com'"
+        cursor.fetchall.return_value = [(
+            "request-1", "cancel_query", {"query": raw_query},
+            {"query": raw_query}, "review", "pending", None, None, None,
+            {"observed": {"query": raw_query}}, "audit-1", {"query": raw_query}, None,
+        )]
+        with patch.object(workflow, "_ensure_schema"), patch(
+            "backend.engines.repair_workflow.OperationsStore", return_value=store
+        ):
+            requests = workflow.list_requests()
+
+        for key in ("parameters", "evidence", "finding"):
+            self.assertEqual(requests[0][key]["query"], "SELECT * FROM users WHERE email='?'")
+        self.assertEqual(
+            requests[0]["result"]["observed"]["query"],
+            "SELECT * FROM users WHERE email='?'",
+        )
+        self.assertNotIn("private@example.com", str(requests))
         store.close.assert_called_once()
 
     def test_capabilities_declare_only_verified_repair_executor(self):
@@ -510,7 +548,13 @@ class RepairClaimTests(unittest.TestCase):
             "waits": [{"node_name": "dn0001", "waiting_pid": 200, "blockers": [blocker]}],
             "database_identity": target["database_identity"],
         }}
-        self.assertEqual(RepairWorkflow._lock_target(target, finding), target)
+        normalized = RepairWorkflow._lock_target(target, finding)
+        self.assertEqual(normalized["query"], "UPDATE public.items SET value=?")
+        self.assertEqual(len(normalized["query_fingerprint"]), 64)
+        self.assertEqual(
+            {key: value for key, value in normalized.items() if key not in {"query", "query_fingerprint"}},
+            {key: value for key, value in target.items() if key != "query"},
+        )
         with self.assertRaisesRegex(ValueError, "identity"):
             RepairWorkflow._lock_target({**target, "pid": 124}, finding)
         with self.assertRaisesRegex(ValueError, "complete blocker identity"):
