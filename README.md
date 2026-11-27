@@ -114,6 +114,16 @@ python scripts/metadata_backup.py verify backups/aiops-metadata-<timestamp>.dump
 python scripts/metadata_backup.py restore backups/aiops-metadata-<timestamp>.dump --database aiops_recovery
 ```
 
+按计划自动备份可启用独立 Compose profile。它第一次启动时立即备份，之后按间隔执行，并按保留天数删除过期 `.dump` 及对应校验文件。
+
+```powershell
+docker compose --profile backup up -d metadata-backup
+docker compose logs -f metadata-backup
+docker compose stop metadata-backup
+```
+
+通过 `.env` 中的 `AIOPS_METADATA_BACKUP_INTERVAL_SECONDS` 和 `AIOPS_METADATA_BACKUP_RETENTION_DAYS` 调整周期与保留时间。默认 profile 未启用自动备份。
+
 实际恢复会留下 `aiops_recovery` 数据库，应用不会自动切换到它。完成连接配置和抽样核对前，不要删除原数据库；备份文件包含审计、会话、知识库和记忆数据，应按敏感数据保管。
 
 此工具只备份 AIOps 使用的 metadata/knowledge PostgreSQL，不包含所连接的 OpenTenBase 业务集群，也不是连续 WAL/PITR 备份。当前执行方式为人工按需运行，生产环境仍需设置备份计划、异地副本和保留策略。
@@ -165,6 +175,8 @@ opentenbase-aiops/
 | `AIOPS_AUTO_AUDIT_ENABLED` | 是否启用周期健康巡检 | `true` |
 | `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` | 周期巡检间隔秒数，最小 60 秒 | `900` |
 | `AIOPS_AUTO_AUDIT_TABLE` | 周期巡检统计目标，支持逗号分隔，例如 `public.orders,public.items` | 空，使用全库采集 |
+| `AIOPS_METADATA_BACKUP_INTERVAL_SECONDS` | backup profile 的 metadata 备份周期，最小 60 秒 | `86400` |
+| `AIOPS_METADATA_BACKUP_RETENTION_DAYS` | backup profile 保留归档的天数，最小 1 天 | `30` |
 | `AIOPS_DATA_NODE_TABLE_LIMIT` | 全库巡检每个 DN 的表统计采集上限，超限时报告部分采集 | `200` |
 | `AIOPS_SLOW_QUERY_LOG_LOOKBACK_SECONDS` | 从 CN/DN CSV 日志中读取近期慢语句的时间窗口 | `900` |
 | `AIOPS_SLOW_QUERY_REDACT_LITERALS` | 脱敏慢日志、活动查询和锁证据中的 SQL 字符串/数字 literal | `true` |

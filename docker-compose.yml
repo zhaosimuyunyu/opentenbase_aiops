@@ -17,6 +17,33 @@ services:
       timeout: 3s
       retries: 20
 
+  metadata-backup:
+    image: pgvector/pgvector:pg16
+    profiles: ["backup"]
+    networks:
+      - otb-lab-net
+    depends_on:
+      knowledge-db:
+        condition: service_healthy
+    environment:
+      - PGHOST=knowledge-db
+      - PGPORT=5432
+      - PGDATABASE=aiops_knowledge
+      - PGUSER=aiops_knowledge
+      - PGPASSWORD=${KNOWLEDGE_DB_PASSWORD:-aiops-local-dev-only}
+      - AIOPS_METADATA_BACKUP_INTERVAL_SECONDS=${AIOPS_METADATA_BACKUP_INTERVAL_SECONDS:-86400}
+      - AIOPS_METADATA_BACKUP_RETENTION_DAYS=${AIOPS_METADATA_BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/metadata_backup_loop.sh:/app/metadata_backup_loop.sh:ro
+    command: ["sh", "/app/metadata_backup_loop.sh"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h knowledge-db -U aiops_knowledge -d aiops_knowledge"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
   aiops-service:
     build: .
     container_name: opentenbase-aiops
