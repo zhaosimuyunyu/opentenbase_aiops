@@ -236,7 +236,7 @@ OpenTenBase v5.0 实测普通角色执行 `EXECUTE DIRECT` 返回 `42501`。配�
 通过 Prometheus 的 `rule_files` 加载仓库中的 `monitoring/aiops-alerts.yml`，并用现有 Alertmanager 路由投递告警。
 规则覆盖高风险、定时巡检超期、指标抓取失败、采集不完整和模型诊断回退。
 
-周期巡检默认启用，每 900 秒运行一次只读健康审计，结果写入巡检历史。可通过 `AIOPS_AUTO_AUDIT_ENABLED` 关闭，或用 `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` 修改间隔。多 API 实例通过知识库 PostgreSQL advisory lock 选出单一巡检者。手动巡检也经过 API 并使用同一把锁。
+Docker Compose 默认启用周期巡检，每 900 秒运行一次只读健康审计，结果写入巡检历史。可通过 `AIOPS_AUTO_AUDIT_ENABLED=false` 关闭，或用 `AIOPS_AUTO_AUDIT_INTERVAL_SECONDS` 修改间隔。直接运行 Python 时，该配置的代码默认值为关闭。多 API 实例通过知识库 PostgreSQL advisory lock 选出单一巡检者。手动巡检也经过 API 并使用同一把锁。
 
 ### OpenTenBase 连接
 

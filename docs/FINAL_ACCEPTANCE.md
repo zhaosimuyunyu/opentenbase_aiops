@@ -10,7 +10,7 @@
 |---|---|---|
 | 可演示应用 | Docker Compose、Streamlit `:8088`、FastAPI `:8000`、`/health` ready | 已完成 |
 | 智能问答 | 多轮 Agent、SSE、会话持久化、知识检索和实时数据库工具 | 已完成 |
-| 智能化监控 | 周期只读巡检、CN/DN 采集、SSE 进度、审计持久化、失败退避 | 已完成 |
+| 智能化监控 | Docker Compose 默认启用周期只读巡检、CN/DN 采集、SSE 进度、审计持久化、失败退避 | 已完成 |
 | 会话异常诊断 | `pg_locks`、阻塞会话、prepared transaction 证据；`simulate_lock_wait.py` 实测 | 已完成 |
 | 慢 SQL 诊断 | `simulate_slow_query.py` 通过 CSV 慢日志捕获自然结束的 `pg_sleep`，进入 SSE 审计 | 已完成，但属于事后日志诊断 |
 | SQL 审核 | 静态规则、单条语句校验、只读 EXPLAIN、顺序扫描估算风险 | 部分完成 |
@@ -53,7 +53,7 @@
 
 ## 4. 交付命令
 
-下载后先按 [连接说明](../README.md#opentenbase-连接) 配置实际 CN 的 PostgreSQL 协议地址、SQL 端口、数据库和账号。默认 Compose 自建应用网络，已有课程集群按连接说明使用 `compose.lab.yml`。用 `/health` 检查 CN 连通性，再用兼容性脚本验证节点直连、系统视图和权限。本文的实机结果来自 OpenTenBase v5.0 实验集群。
+下载后先按 [连接说明](../README.md#opentenbase-连接) 配置实际 CN 的 PostgreSQL 协议地址、SQL 端口、数据库和账号。Docker Compose 会自动创建 AIOps 应用网络，已有课程集群按连接说明使用 `compose.lab.yml`。用 `/health` 检查 CN 连通性，再用兼容性脚本验证节点直连、系统视图和权限。本文的实机结果来自 OpenTenBase v5.0 实验集群。
 
 ```powershell
 git clone https://github.com/zhaosimuyunyu/opentenbase_aiops.git

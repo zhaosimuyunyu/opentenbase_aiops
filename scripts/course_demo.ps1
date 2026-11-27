@@ -25,16 +25,51 @@ $status = Invoke-RestMethod "$apiUrl/api/automation/status" -TimeoutSec 20
 
 if (-not $SkipLiveAgent) {
     Write-Output "[3/8] Asking the live AIOps agent to inspect the cluster"
-    $agent = Invoke-RestMethod -Method Post -Uri "$apiUrl/api/qa/ask" `
-        -ContentType "application/json" `
-        -Body (@{
-            question = "Use live cluster diagnostics and the knowledge base. Report the observed topology, audit findings, and SQL tools available in this environment."
-            history = @()
-        } | ConvertTo-Json -Depth 5) -TimeoutSec 900
+    $sessionId = [guid]::NewGuid().ToString()
+    $turnId = [guid]::NewGuid().ToString()
+    $requestBody = @{
+        question = "Use live cluster diagnostics and the knowledge base. Report the observed topology, audit findings, and SQL tools available in this environment."
+        history = @()
+        session_id = $sessionId
+        turn_id = $turnId
+    } | ConvertTo-Json -Depth 5
+    $httpClient = [System.Net.Http.HttpClient]::new()
+    $httpClient.Timeout = [TimeSpan]::FromSeconds(900)
+    $httpRequest = [System.Net.Http.HttpRequestMessage]::new(
+        [System.Net.Http.HttpMethod]::Post, "$apiUrl/api/qa/ask/stream"
+    )
+    $httpRequest.Content = [System.Net.Http.StringContent]::new(
+        $requestBody, [System.Text.Encoding]::UTF8, "application/json"
+    )
+    $response = $httpClient.SendAsync(
+        $httpRequest, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+    ).GetAwaiter().GetResult()
+    $response.EnsureSuccessStatusCode()
+    $reader = [System.IO.StreamReader]::new(
+        $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+    )
+    $agentResult = $null
+    while ($null -ne ($line = $reader.ReadLine())) {
+        if ($line.StartsWith("data: ")) {
+            $event = $line.Substring(6) | ConvertFrom-Json
+            if ($event.type -eq "error") { throw "Live Agent failed: $($event.message)" }
+            if ($event.type -eq "progress") { Write-Output "Agent progress: $($event.stage)" }
+            if ($event.type -eq "tool") { Write-Output "Agent tool: $($event.tool) ($($event.stage))" }
+            if ($event.type -eq "result") {
+                $agentResult = $event
+                break
+            }
+        }
+    }
+    $reader.Dispose()
+    $response.Dispose()
+    $httpRequest.Dispose()
+    $httpClient.Dispose()
+    if (-not $agentResult) { throw "Live Agent SSE ended without a result" }
     [pscustomobject]@{
-        answer = $agent.answer
-        tool_trace = $agent.tool_trace
-        rounds = $agent.rounds
+        answer = $agentResult.answer
+        tool_trace = $agentResult.tool_trace
+        rounds = $agentResult.rounds
     } | ConvertTo-Json -Depth 8
 } else {
     Write-Output "Skipping live LLM conversation by request"

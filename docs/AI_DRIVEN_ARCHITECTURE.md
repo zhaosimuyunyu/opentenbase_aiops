@@ -1,6 +1,8 @@
-# OpenTenBase AIOps - AI-Driven 架构设计
+# OpenTenBase AIOps - AI-Driven 架构设计（早期方案）
 
-> **核心理念**：借鉴 AgentX 的数据库中心化设计，构建**可信、可审计、可恢复**的 AI 运维系统
+> 本文包含项目早期的目标架构、伪代码和路线设想，不是当前实现清单。当前代码使用 Streamlit 前端、FastAPI API、单个多轮 AIOps Agent，以及 PostgreSQL/pgvector 元数据服务。文中的 React 前端、分层权限模型、可恢复诊断任务等内容不能据此视为已实现功能。当前功能与验证范围以 README、课程交付说明和最终验收报告为准。
+
+> **早期设计目标**：参考 AgentX 的数据库中心化设计，探索可信、可审计的 AI 运维系统
 
 ---
 
